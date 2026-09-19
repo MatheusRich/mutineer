@@ -6,6 +6,32 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-18
+
+### Added
+- **RubyGems `documentation_uri`**: the published gem now points at the docs
+  site (`https://davidteren.github.io/mutineer/`) so gem-page discovery
+  reaches the Pages docs (#90).
+
+### Fixed
+- **A red unmutated suite can no longer pass a mutation gate** — coverage
+  capture now keeps the original Minitest/RSpec result, and a failing clean run
+  aborts with the existing smoke-check error (exit 1) instead of scoring those
+  assertion failures as killed mutants. A warm coverage cache re-checks the
+  current suite and cannot bypass this (#96).
+- **Concurrent external runs no longer restore each other's source files** —
+  swap and orphan recovery share one exclusive OS lock per source, acquired
+  before reading or healing. A live owner's mutant and backup stay intact; a
+  dead owner's backup still restores the original bytes (#99).
+- **Coverage cache now invalidates when a required test helper changes** —
+  a successful map records fingerprints of project-local loaded Ruby files,
+  old cache entries without that data rebuild, and a helper-only edit no
+  longer hides a new survivor behind a stale 100% score (#97).
+- **Release version calculation ignores floating major tags** — `release-pr.yml`
+  selects the newest complete `vMAJOR.MINOR.PATCH` ancestor and validates the
+  next version before writing files, so a later `v1` tag can no longer produce
+  `v1..1` (#95).
+
 ## [1.0.0] - 2026-09-08
 
 The GitHub Action's PR default changes in this release, which is why it is a
@@ -381,6 +407,7 @@ Rails hardening + CI batch (issues #8–#13), all verified Rails-free.
 - `.mutineer.yml` configuration (CLI > config > default precedence).
 - Byte-correct source handling for multibyte (UTF-8) sources.
 
+[1.0.1]: https://github.com/davidteren/mutineer/releases/tag/v1.0.1
 [1.0.0]: https://github.com/davidteren/mutineer/releases/tag/v1.0.0
 [0.11.4]: https://github.com/davidteren/mutineer/releases/tag/v0.11.4
 [0.11.3]: https://github.com/davidteren/mutineer/releases/tag/v0.11.3

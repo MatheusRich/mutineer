@@ -22,7 +22,7 @@ module Mutineer
     # Seconds per coverage subprocess before the parent kills it.
     DEFAULT_CAPTURE_TIMEOUT = 120
 
-    attr_reader :project_root, :failed_test_files, :phase_a_ran, :map
+    attr_reader :project_root, :failed_test_files, :failed_clean_tests, :phase_a_ran, :map
 
     # Build a QUERY-ONLY map from data captured elsewhere (the daemon builds the
     # map app-side and ships `map` + `failed_test_files` over IPC; the tool
@@ -33,11 +33,13 @@ module Mutineer
     # @param map [Hash] the "file:line" => [test_files] map.
     # @param failed_test_files [Array<String>] test files whose capture failed.
     # @param project_root [String] project root (for path relativization).
+    # @param failed_clean_tests [Array<String>] test files whose unmutated run failed.
     # @return [Mutineer::CoverageMap] a query-only map.
-    def self.from_data(map:, failed_test_files:, project_root:)
+    def self.from_data(map:, failed_test_files:, project_root:, failed_clean_tests: [])
       instance = allocate
       instance.instance_variable_set(:@map, map || {})
       instance.instance_variable_set(:@failed_test_files, failed_test_files || [])
+      instance.instance_variable_set(:@failed_clean_tests, failed_clean_tests || [])
       instance.instance_variable_set(:@project_root, project_root)
       instance
     end
@@ -57,6 +59,8 @@ module Mutineer
       @verbose      = verbose
       @map          = {}
       @failed_test_files = []
+      @failed_clean_tests = []
+      @loaded_dependencies = {}
       @phase_a_ran  = false
     end
 
@@ -75,7 +79,7 @@ module Mutineer
     # never collides with a standalone one).
     def build_via_fork(after_fork: nil)
       warn_external_sources
-      cached_or { run_phase_a_via_fork(after_fork: after_fork) }
+      cached_or(after_fork: after_fork) { run_phase_a_via_fork(after_fork: after_fork) }
     end
 
     # Lookup: the test files that cover `file:line`, or [] when none do.
@@ -141,18 +145,30 @@ module Mutineer
     end
 
     # Shared cache dance for both build paths: hit the digest-keyed cache, else
-    # yield to populate @map and persist it.
-    def cached_or
+    # yield to populate @map and persist it. A digest match is not proof that
+    # today's unmutated suite still passes — re-check on a cache hit.
+    #
+    # @param after_fork [Proc, nil] boot-mode fork hook forwarded to a clean re-check.
+    # @yield when the cache is missing or stale.
+    # @return [Mutineer::CoverageMap] self.
+    def cached_or(after_fork: nil)
       @digest = compute_digest
       cached = read_cache
-      if cached && cached["digest"] == @digest
+      if cached && cached["digest"] == @digest && dependencies_match?(cached)
         @map = cached["map"] || {}
         @failed_test_files = cached["failed_test_files"] || []
+        @failed_clean_tests = []
+        @loaded_dependencies = cached["dependencies"] || {}
+        retry_failed_captures(after_fork)
         warn_incomplete unless @failed_test_files.empty?
+        verify_cached_clean(after_fork: after_fork)
+        verify_combined_clean(after_fork: after_fork)
+        save
         return self
       end
 
       yield
+      verify_combined_clean(after_fork: after_fork)
       save
       self
     end
@@ -164,12 +180,14 @@ module Mutineer
       @phase_a_ran = true
       @map = {}
       @failed_test_files = []
+      @failed_clean_tests = []
+      @loaded_dependencies = {}
 
       @test_paths.each do |test_path|
-        coverage = capture(test_path)
-        next unless coverage
+        payload = capture(test_path)
+        next unless payload
 
-        record(coverage, test_path)
+        accept_capture_payload(test_path, payload)
       end
     end
 
@@ -182,16 +200,18 @@ module Mutineer
       @phase_a_ran = true
       @map = {}
       @failed_test_files = []
+      @failed_clean_tests = []
+      @loaded_dependencies = {}
       abs_sources = abs_source_paths
 
       @test_paths.each do |test_path|
-        # Tri-state payload: Hash = coverage, String = error diagnostic from the
-        # child, nil = pipe gone / empty. The String diagnostic is what becomes
-        # an :uncapturable status.
-        case (coverage = fork_capture(absolute(test_path), abs_sources, after_fork))
-        when Hash   then record(coverage, test_path)
+        # Tri-state payload: Hash = capture result, String = error diagnostic from
+        # the child, nil = pipe gone / empty. The String diagnostic is what
+        # becomes an :uncapturable status.
+        case (payload = fork_capture(absolute(test_path), abs_sources, after_fork))
+        when Hash then accept_capture_payload(test_path, payload)
         when String
-          fail_test(test_path, @verbose ? "fork capture failed: #{coverage}" :
+          fail_test(test_path, @verbose ? "fork capture failed: #{payload}" :
             "fork capture produced no result (re-run with --verbose for the error)")
         else fail_test(test_path, "fork capture produced no result")
         end
@@ -217,12 +237,14 @@ module Mutineer
             # file needs neither Runner (Prism) nor Rails.
             after_fork&.call
             Coverage.result(clear: true, stop: false) # discard pre-test delta
-            TestRunners.for(@framework).run([abs_test])
+            passed = TestRunners.for(@framework).run([abs_test]).zero?
             # lines:true yields {file => {lines: [...]}}; reduce to the counts
             # array record() expects, keeping only our source files.
-            Coverage.result(stop: false)
-                    .select { |f, _| abs_sources.include?(f) }
-                    .transform_values { |v| v.is_a?(Hash) ? v[:lines] : v }
+            coverage = Coverage.result(stop: false)
+                               .select { |f, _| abs_sources.include?(f) }
+                               .transform_values { |v| v.is_a?(Hash) ? v[:lines] : v }
+            { "passed" => passed, "coverage" => coverage,
+              "loaded_files" => capture_loaded_files }
           rescue Exception => e # rubocop:disable Lint/RescueException
             # Stringify (an arbitrary Exception may not marshal); the parent
             # surfaces this under --verbose. A String marshals safely over the pipe.
@@ -268,8 +290,8 @@ module Mutineer
 
     # Spawns a fresh `ruby` reading an inline script from stdin. A fork would
     # miss already-loaded app lines, so Coverage must start in a clean process
-    # before any source is loaded. Returns the parsed Coverage.result hash, or
-    # nil when the subprocess failed (logged + skipped).
+    # before any source is loaded. Returns the wrapped capture payload
+    # (`passed` + `coverage`), or nil when the subprocess failed (logged + skipped).
     def capture(test_path)
       out = +""
       status = nil
@@ -289,7 +311,10 @@ module Mutineer
       end
       return fail_test(test_path, "subprocess exited #{status.exitstatus}") unless status.success?
 
-      JSON.parse(out)
+      parsed = JSON.parse(out)
+      return fail_test(test_path, "invalid coverage output: missing pass/coverage payload") unless wrapped_capture?(parsed)
+
+      parsed
     rescue JSON::ParserError => e
       fail_test(test_path, "invalid coverage output: #{e.message}")
     end
@@ -305,6 +330,241 @@ module Mutineer
       @failed_test_files << rel
       warn "[mutineer] coverage skipped for #{rel}: #{reason}"
       nil
+    end
+
+    # True when `payload` is the wrapped capture JSON/Marshal contract
+    # (`passed` + `coverage`), not a raw Coverage.result hash.
+    #
+    # @api private
+    # @param payload [Object] parsed subprocess output or forked Marshal value.
+    # @return [Boolean]
+    def wrapped_capture?(payload)
+      payload.is_a?(Hash) && payload.key?("passed") && payload.key?("coverage")
+    end
+
+    # Records a wrapped capture: assertion failures go to {#failed_clean_tests};
+    # successful coverage is inverted into the map. Capture crashes stay in
+    # {#failed_test_files} via {#fail_test}.
+    #
+    # @api private
+    # @param test_path [String] test file path.
+    # @param payload [Hash] wrapped capture with string keys.
+    # @return [void]
+    def accept_capture_payload(test_path, payload)
+      unless wrapped_capture?(payload)
+        fail_test(test_path, "invalid coverage output: missing pass/coverage payload")
+        return
+      end
+
+      record_loaded(payload["loaded_files"])
+
+      unless payload["passed"]
+        @failed_clean_tests << relativize(test_path)
+        return
+      end
+
+      coverage = payload["coverage"]
+      record(coverage, test_path) if coverage.is_a?(Hash)
+    end
+
+    # Re-runs each successfully captured test on a cache hit. Digest equality
+    # cannot prove the current unmutated suite still passes.
+    #
+    # @api private
+    # @param after_fork [Proc, nil] boot-mode fork hook.
+    # @return [void]
+    def verify_cached_clean(after_fork: nil)
+      @test_paths.each do |test_path|
+        rel = relativize(test_path)
+        next if @failed_test_files.include?(rel)
+
+        ok = if @boot_path
+               fork_clean_pass?([absolute(test_path)], after_fork)
+             else
+               subprocess_clean_pass?([test_path])
+             end
+        @failed_clean_tests << rel unless ok
+      end
+    end
+
+    # Re-runs tests whose previous capture crashed. A fixed helper is invisible
+    # to the source/test digest when that capture never recorded `loaded_files`.
+    #
+    # @api private
+    # @param after_fork [Proc, nil] boot-mode fork hook.
+    # @return [void]
+    def retry_failed_captures(after_fork)
+      pending = @failed_test_files.dup
+      return if pending.empty?
+
+      @failed_test_files = []
+      abs_sources = abs_source_paths
+      pending.each do |rel|
+        test_path = @test_paths.find { |t| relativize(t) == rel } || rel
+        if @boot_path
+          payload = fork_capture(absolute(test_path), abs_sources, after_fork)
+          case payload
+          when Hash then accept_capture_payload(test_path, payload)
+          when String
+            fail_test(test_path, @verbose ? "fork capture failed: #{payload}" :
+              "fork capture produced no result (re-run with --verbose for the error)")
+          else fail_test(test_path, "fork capture produced no result")
+          end
+        else
+          payload = capture(test_path)
+          accept_capture_payload(test_path, payload) if payload
+        end
+      end
+    end
+
+    # Runs every successfully captured test together. Per-file capture can miss a
+    # failure that only appears when covering files share one process.
+    #
+    # @api private
+    # @param after_fork [Proc, nil] boot-mode fork hook.
+    # @return [void]
+    def verify_combined_clean(after_fork: nil)
+      runnable = @test_paths.reject { |t| @failed_test_files.include?(relativize(t)) }
+      return if runnable.size < 2
+      return unless @failed_clean_tests.empty?
+
+      ok = if @boot_path
+             fork_clean_pass?(runnable.map { |t| absolute(t) }, after_fork)
+           else
+             subprocess_clean_pass?(runnable)
+           end
+      @failed_clean_tests << "combined suite" unless ok
+    end
+
+    # Runs test files in a fresh interpreter and returns whether they passed.
+    #
+    # @api private
+    # @param test_paths [Array<String>] test file paths.
+    # @return [Boolean]
+    def subprocess_clean_pass?(test_paths)
+      status = nil
+      Open3.popen2(RbConfig.ruby, "-") do |stdin, stdout, wait_thr|
+        stdin.write(clean_check_script(test_paths))
+        stdin.close
+        reader = Thread.new { stdout.read }
+        unless wait_thr.join(@capture_timeout)
+          Process.kill(:KILL, wait_thr.pid) rescue nil # rubocop:disable Style/RescueModifier
+          reader.kill
+          return false
+        end
+        reader.join
+        status = wait_thr.value
+      end
+      status&.success?
+    end
+
+    # Runs test files in a fork of the booted parent and returns whether they passed.
+    # Bounded by `@capture_timeout` so a hung child cannot block the CLI.
+    #
+    # @api private
+    # @param abs_tests [Array<String>] absolute test file paths.
+    # @param after_fork [Proc, nil] boot-mode fork hook.
+    # @return [Boolean]
+    def fork_clean_pass?(abs_tests, after_fork)
+      rd, wr = IO.pipe
+      rd.binmode
+      wr.binmode
+      pid = fork do
+        rd.close
+        Process.setpgid(0, 0) rescue nil # rubocop:disable Style/RescueModifier
+        begin
+          after_fork&.call
+          Coverage.result(clear: true, stop: false) if Coverage.running?
+          wr.write(Marshal.dump(TestRunners.for(@framework).run(abs_tests).zero?))
+        rescue Exception # rubocop:disable Lint/RescueException
+          wr.write(Marshal.dump(false))
+        ensure
+          wr.close
+          exit!(0)
+        end
+      end
+      wr.close
+      readable, = IO.select([rd], nil, nil, @capture_timeout)
+      unless readable
+        kill_fork_clean(pid)
+        rd.close
+        return false
+      end
+      data = rd.read
+      rd.close
+      Process.waitpid2(pid)
+      return false if data.empty?
+
+      Marshal.load(data)
+    rescue StandardError
+      false
+    end
+
+    # SIGKILLs a hung clean-check child (and its group) then reaps it.
+    #
+    # @api private
+    # @param pid [Integer] child pid.
+    # @return [void]
+    def kill_fork_clean(pid)
+      begin
+        Process.kill(:KILL, -pid)
+      rescue Errno::ESRCH, Errno::EPERM
+        Process.kill(:KILL, pid) rescue nil # rubocop:disable Style/RescueModifier
+      end
+      Process.waitpid2(pid) rescue nil # rubocop:disable Style/RescueModifier
+    end
+
+    # Builds a pass/fail-only subprocess script (no coverage instrumentation).
+    #
+    # @api private
+    # @param test_paths [Array<String>] test file paths.
+    # @return [String] Ruby script text.
+    def clean_check_script(test_paths)
+      @framework == "rspec" ? rspec_clean_check_script(test_paths) : minitest_clean_check_script(test_paths)
+    end
+
+    # Minitest clean-suite check. Preloads configured sources like capture and
+    # standalone {Runner.execute}, so tests that rely on that preload stay green.
+    #
+    # @api private
+    # @param test_paths [Array<String>] test file paths.
+    # @return [String] Ruby script text.
+    def minitest_clean_check_script(test_paths)
+      loads = Array(test_paths).map { |t| "load #{absolute(t).inspect}" }.join("\n")
+      <<~RUBY
+        require "minitest"
+        require "stringio"
+        def Minitest.autorun; end
+        $LOAD_PATH.unshift(*#{abs_load_paths.inspect})
+        #{abs_source_paths.inspect}.each { |f| load f }
+        #{loads}
+        $stdout = StringIO.new
+        exit(Minitest.run([]) ? 0 : 1)
+      RUBY
+    end
+
+    # RSpec clean-suite check. Preloads configured sources like capture.
+    #
+    # @api private
+    # @param test_paths [Array<String>] spec file paths.
+    # @return [String] Ruby script text.
+    def rspec_clean_check_script(test_paths)
+      specs = Array(test_paths).map { |t| absolute(t).inspect }.join(", ")
+      <<~RUBY
+        require "stringio"
+        begin
+          require "rspec/core"
+        rescue LoadError
+          exit 3
+        end
+        RSpec::Core::Runner.disable_autorun!
+        $LOAD_PATH.unshift(*#{abs_load_paths.inspect})
+        #{abs_source_paths.inspect}.each { |f| load f }
+        _sink = StringIO.new
+        $stdout = _sink
+        status = RSpec::Core::Runner.run(["--no-color", #{specs}], _sink, _sink)
+        exit(status.zero? ? 0 : 1)
+      RUBY
     end
 
     # Builds the framework-specific subprocess script.
@@ -334,9 +594,10 @@ module Mutineer
         load #{absolute(test_path).inspect}
         _orig = $stdout
         $stdout = StringIO.new
-        Minitest.run([])
+        _passed = Minitest.run([])
         $stdout = _orig
-        puts Coverage.result.to_json
+        puts JSON.generate("passed" => _passed == true, "coverage" => Coverage.result,
+                           "loaded_files" => #{loaded_files_expression})
       RUBY
     end
 
@@ -363,9 +624,10 @@ module Mutineer
         _orig = $stdout
         _sink = StringIO.new
         $stdout = _sink
-        RSpec::Core::Runner.run(["--no-color", #{absolute(test_path).inspect}], _sink, _sink)
+        _status = RSpec::Core::Runner.run(["--no-color", #{absolute(test_path).inspect}], _sink, _sink)
         $stdout = _orig
-        puts Coverage.result.to_json
+        puts JSON.generate("passed" => _status.zero?, "coverage" => Coverage.result,
+                           "loaded_files" => #{loaded_files_expression})
       RUBY
     end
 
@@ -384,6 +646,101 @@ module Mutineer
 
           (@map["#{rel}:#{idx + 1}"] ||= []) << rel_test
         end
+      end
+    end
+
+    # Ruby source of the child-side `$LOADED_FEATURES` filter (project `.rb` files).
+    #
+    # @api private
+    # @return [String] expression to embed in a capture subprocess script.
+    def loaded_files_expression
+      root = project_root_real
+      prefix = root.end_with?("/") ? root : "#{root}/"
+      "begin; _root = #{prefix.inspect}; $LOADED_FEATURES.filter_map { |f| next unless f.end_with?(\".rb\"); abs = (File.realpath(f) rescue next); abs if abs.start_with?(_root) }; rescue StandardError; []; end"
+    end
+
+    # Canonical project root for loaded-feature matching (`/var` vs `/private/var`).
+    #
+    # @api private
+    # @return [String] realpath of the project root when it exists.
+    def project_root_real
+      File.realpath(File.expand_path(@project_root))
+    rescue Errno::ENOENT
+      File.expand_path(@project_root)
+    end
+
+    # Project-local `.rb` files loaded in this process at capture time.
+    #
+    # @api private
+    # @return [Array<String>] absolute realpaths.
+    def capture_loaded_files
+      prefix = project_root_real
+      prefix = "#{prefix}/" unless prefix.end_with?("/")
+      $LOADED_FEATURES.filter_map do |f|
+        next unless f.end_with?(".rb")
+
+        abs = File.realpath(f)
+        abs if abs.start_with?(prefix)
+      rescue Errno::ENOENT
+        nil
+      end
+    end
+
+    # Fingerprints project-local support files from a capture payload.
+    #
+    # @api private
+    # @param paths [Array, nil] absolute loaded-file paths.
+    # @return [void]
+    def record_loaded(paths)
+      Array(paths).each do |raw|
+        next unless raw.is_a?(String) && File.file?(raw)
+
+        abs = File.realpath(raw)
+        rel = loaded_relative(abs)
+        next unless rel
+        next unless rel.end_with?(".rb")
+        next if rel.start_with?("vendor/bundle/") || rel.start_with?("node_modules/")
+
+        @loaded_dependencies[rel] = file_fingerprint(abs)
+      end
+    end
+
+    # Path of `abs` relative to the real project root, or nil when outside it.
+    #
+    # @api private
+    # @param abs [String] absolute realpath.
+    # @return [String, nil]
+    def loaded_relative(abs)
+      root = project_root_real
+      prefix = root.end_with?("/") ? root : "#{root}/"
+      return unless abs.start_with?(prefix)
+
+      abs.delete_prefix(prefix)
+    end
+
+    # Byte fingerprint of a file for cache dependency checks.
+    #
+    # @api private
+    # @param abs [String] absolute path.
+    # @return [String] hex digest.
+    def file_fingerprint(abs)
+      content = File.binread(abs)
+      Digest::SHA256.hexdigest("#{content.bytesize}\0#{content}")
+    end
+
+    # True when the cached map recorded support-file fingerprints and they still
+    # match. Missing validity data is a miss (rebuild).
+    #
+    # @api private
+    # @param cached [Hash] parsed coverage.json.
+    # @return [Boolean]
+    def dependencies_match?(cached)
+      deps = cached["dependencies"]
+      return false unless deps.is_a?(Hash)
+
+      deps.all? do |rel, fingerprint|
+        abs = absolute(rel)
+        File.file?(abs) && file_fingerprint(abs) == fingerprint
       end
     end
 
@@ -462,8 +819,11 @@ module Mutineer
     # @api private
     # @return [void]
     def save
+      return unless @failed_clean_tests.empty?
+
       FileUtils.mkdir_p(@cache_dir)
-      data = { "digest" => @digest, "failed_test_files" => @failed_test_files, "map" => @map }
+      data = { "digest" => @digest, "failed_test_files" => @failed_test_files,
+               "dependencies" => @loaded_dependencies, "map" => @map }
       tmp = "#{cache_path}.tmp"
       File.write(tmp, JSON.generate(data))
       File.rename(tmp, cache_path) # atomic swap
@@ -494,9 +854,13 @@ module Mutineer
     # @param path [String] path to relativize.
     # @return [String] relative path.
     def relativize(path)
-      return path unless path.start_with?("/")
+      abs = path.start_with?("/") ? path : absolute(path)
+      abs = realpath_if_exists(abs)
+      root = project_root_real
+      prefix = root.end_with?("/") ? root : "#{root}/"
+      return abs unless abs.start_with?(prefix)
 
-      path.delete_prefix("#{@project_root}/")
+      abs.delete_prefix(prefix)
     end
 
     # Expands a path relative to the project root.
@@ -505,7 +869,17 @@ module Mutineer
     # @param path [String] path to expand.
     # @return [String] absolute path.
     def absolute(path)
-      File.absolute_path?(path) ? path : File.expand_path(path, @project_root)
+      raw = File.absolute_path?(path) ? path : File.expand_path(path, @project_root)
+      realpath_if_exists(raw)
+    end
+
+    # Real path when the file exists, otherwise `path` unchanged.
+    #
+    # @api private
+    # @param path [String] absolute or relative path.
+    # @return [String]
+    def realpath_if_exists(path)
+      File.exist?(path) ? File.realpath(path) : path
     end
   end
 end
