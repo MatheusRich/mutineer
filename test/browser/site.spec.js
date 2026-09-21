@@ -31,6 +31,15 @@ test('theme, keyboard disclosure, copy and mobile navigation work together', asy
   await expect(page.getByRole('region', { name: 'Summary fields', exact: true })).toBeVisible();
 });
 
+test('markdown twins and agent entrypoints are served', async ({ request }) => {
+  for (const path of ['/index.md', '/agentic-coding.md', '/json-schema.md', '/llms.txt', '/llms-full.txt', '/skill.md', '/agents.txt', '/sitemap.xml']) {
+    const res = await request.get(path);
+    expect(res.ok(), `${path} should be 200`).toBeTruthy();
+  }
+  const html = await request.get('/');
+  expect(await html.text()).toContain('rel="alternate" type="text/markdown"');
+});
+
 test('content and disclosure remain usable without JavaScript', async ({ browser }) => {
   const context = await browser.newContext({ javaScriptEnabled: false });
   try {
