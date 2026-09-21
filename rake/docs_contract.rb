@@ -206,9 +206,25 @@ module DocsContract
       start = "<!-- contract:#{name} -->"
       stop = "<!-- /contract:#{name} -->"
       pattern = /#{Regexp.escape(start)}.*?#{Regexp.escape(stop)}/m
-      raise "#{name} markers missing" unless text.match?(pattern)
+      replace_exactly_once(text, pattern, "#{name} markers") do
+        "#{start}\n#{body.chomp}\n#{stop}"
+      end
+    end
 
-      text.sub(pattern, "#{start}\n#{body.chomp}\n#{stop}")
+    # Replace `pattern` once. Raises if the target is missing or ambiguous
+    # so `docs:generate` cannot silently leave a stale copy in place.
+    #
+    # @param text [String]
+    # @param pattern [Regexp]
+    # @param label [String]
+    # @yieldparam match [MatchData]
+    # @return [String]
+    def replace_exactly_once(text, pattern, label)
+      count = text.scan(pattern).length
+      raise "#{label}: target missing — cannot apply the contract" if count.zero?
+      raise "#{label}: matched #{count} times, expected 1" if count != 1
+
+      text.sub(pattern) { yield Regexp.last_match }
     end
 
     # @param text [String]
@@ -217,13 +233,19 @@ module DocsContract
       text.include?("| `--threshold FLOAT` | #{contract.fetch('threshold_readme')} |")
     end
 
+    # Rewrite the README options-table row keyed by the `--threshold FLOAT`
+    # flag column, not the generated meaning cell.
+    #
     # @param text [String]
     # @return [String]
     def apply_threshold_row(text)
-      text.sub(
+      replace_exactly_once(
+        text,
         /^\| `--threshold FLOAT` \|.*\|$/,
+        "README --threshold row"
+      ) do
         "| `--threshold FLOAT` | #{contract.fetch('threshold_readme')} |"
-      )
+      end
     end
 
     # @param text [String]
@@ -233,19 +255,30 @@ module DocsContract
         text.include?(contract.fetch("exit_code_action"))
     end
 
+    # Rewrite Action descriptions keyed by YAML field names, not prose.
+    #
     # @param text [String]
     # @return [String]
     def apply_action(text)
-      text = text.sub(
-        /^    description: "Fail \(exit 1\).*"/,
-        "    description: #{contract.fetch('threshold_action').inspect}"
-      )
-      text.sub(
-        /^    description: "The exit code returned by mutineer.*"/,
-        "    description: #{contract.fetch('exit_code_action').inspect}"
-      )
+      text = replace_exactly_once(
+        text,
+        /^(  threshold:\n    description: ).+$/,
+        "action.yml threshold description"
+      ) { |match| "#{match[1]}#{contract.fetch('threshold_action').inspect}" }
+      replace_exactly_once(
+        text,
+        /^(  exit-code:\n    description: ).+$/,
+        "action.yml exit-code description"
+      ) { |match| "#{match[1]}#{contract.fetch('exit_code_action').inspect}" }
     end
 
+    # Render the schema article. Supported Markdown only: ATX `##`/`###`
+    # headings, fenced code, pipe tables, `- ` lists (wrapped
+    # continuations), paragraphs, HTML comments (skipped), and the one
+    # "A consumer should accept" callout. Other constructs are not
+    # rendered — keep `json-schema.md` inside this subset, and assert
+    # published HTML against the markdown source (not only a self-render).
+    #
     # @param md [String]
     # @return [Array(String, String)] article HTML and TOC HTML
     def render_schema_article(md)

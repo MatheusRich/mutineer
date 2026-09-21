@@ -50,6 +50,50 @@ class DocsContractTest < Minitest::Test
     assert_empty MutineerSiteDocs.stale_files
   end
 
+  def test_apply_threshold_row_rewrites_an_edited_meaning_cell
+    edited = File.read("README.md").sub(
+      "| `--threshold FLOAT` | Exit 1 when",
+      "| `--threshold FLOAT` | garbled when"
+    )
+    refute_includes edited, DocsContract.contract.fetch("threshold_readme")
+    restored = DocsContract.send(:apply_threshold_row, edited)
+    assert_includes restored, "| `--threshold FLOAT` | #{DocsContract.contract.fetch('threshold_readme')} |"
+  end
+
+  def test_apply_action_rewrites_edited_descriptions_by_yaml_key
+    edited = File.read("action.yml")
+      .sub("Fail (exit 1)", "Fails with exit 1")
+      .sub("The exit code returned by mutineer", "Exit status from mutineer")
+    refute_includes edited, DocsContract.contract.fetch("threshold_action")
+    restored = DocsContract.send(:apply_action, edited)
+    assert_includes restored, DocsContract.contract.fetch("threshold_action")
+    assert_includes restored, DocsContract.contract.fetch("exit_code_action")
+  end
+
+  def test_apply_threshold_row_raises_when_the_flag_row_is_missing
+    error = assert_raises(RuntimeError) { DocsContract.send(:apply_threshold_row, "| `--jobs N` | Parallel |\n") }
+    assert_match(/target missing/, error.message)
+  end
+
+  def test_apply_action_raises_when_the_yaml_keys_are_missing
+    error = assert_raises(RuntimeError) { DocsContract.send(:apply_action, "name: Mutineer\n") }
+    assert_match(/target missing/, error.message)
+  end
+
+  def test_json_schema_html_carries_markdown_source_content
+    md = File.read("docs/json-schema.md")
+    html = File.read("docs/json-schema.html")
+    assert_includes html, 'id="exit-codes"'
+    assert_includes html, 'aria-label="Exit codes"'
+    assert_includes html, "schema_version"
+    assert_includes plain(html), plain(DocsContract.meaning_plain("0"))
+    md.scan(/^\#{2,3}\s+(.+)$/).flatten.each do |title|
+      id = DocsContract::HEADING_IDS[title]
+      assert id, "json-schema.md heading #{title.inspect} needs a HEADING_IDS entry"
+      assert_includes html, %(id="#{id}")
+    end
+  end
+
   private
 
   # Strip markup so HTML and Markdown meanings compare.
