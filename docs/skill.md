@@ -40,9 +40,13 @@ mutineer run lib/calculator.rb --test test/calculator_test.rb --threshold 90
 
 ## Exit codes
 
-- `0` — pass (score ≥ threshold, no baseline regression)
-- `1` — tests too weak, or a regression was introduced
-- `2` — misinvocation (bad flag/path), not a test-quality signal
+<!-- contract:exit-codes -->
+| Code | Meaning |
+|------|---------|
+| `0` | Score ≥ threshold (or no gate) **and** no baseline regression. |
+| `1` | Score below `--threshold`, OR nothing could be scored and something broke, or more than one mutant produced no verdict and they exceed 10% of those attempted, OR a `--baseline` regression, OR a runtime error. |
+| `2` | Usage / invalid-flag error (mistyped flag, bad path, unreadable baseline). |
+<!-- /contract:exit-codes -->
 
 ## References
 
