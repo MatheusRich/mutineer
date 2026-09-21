@@ -70,6 +70,9 @@
 <code>rel=&quot;alternate&quot; type=&quot;text/markdown&quot;</code>, <code>index.md</code> is the landing/CLI
 essentials twin, <code>skill.md</code> is listed under Optional in <code>llms.txt</code>, and
 <code>sitemap.xml</code> is generated from the same catalog as <code>llms.txt</code> (#91).</li>
+<li><strong>Single-source CLI contract</strong>: exit codes and <code>--threshold</code> live in
+<code>docs/fragments/contract.yml</code>; <code>rake docs:generate</code> writes <code>llms-full.txt</code>,
+<code>json-schema.html</code>, and the marked copies so they cannot drift (#82).</li>
 <li><strong>YARD API on Pages</strong>: the current gem's YARD HTML is published at
 <code>/api/</code>, linked from the docs site, and <code>rake yard:pages:check</code> keeps it
 from lagging the shipped sources. <code>documentation_uri</code> stays the Pages
@@ -485,7 +488,7 @@ accepted as deprecated aliases.)</li>
 </ul></div></div>
 
       <div id="footer">
-  Generated on Mon Sep 21 07:52:23 2026 by
+  Generated on DATE by
   <a href="https://yardoc.org" title="Yay! A Ruby Documentation Tool" target="_parent">yard</a>
   0.9.45 (ruby-3.4.10).
 </div>

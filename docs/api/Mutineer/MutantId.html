@@ -283,7 +283,7 @@ every edit earlier in the file and would silently stop matching.</p>
   <div class="discussion">
     <p>Computes the stable id for a single mutant.</p>
 <p>NUL-joined so token delimiters (<code>||=</code>, spaces, <code>::</code>, <code>#</code>) can never collide
-with the separator; <a href="0,12">SHA256</a> gives a fixed-length, copy-pasteable key.</p>
+with the separator; <code>SHA256[0,12]</code> gives a fixed-length, copy-pasteable key.</p>
 
   </div>
 </div>
@@ -619,7 +619,7 @@ normalization the Reporter's <code>diff_for</code> uses for its token label.</p>
   <div class="discussion">
     <p>Computes the stable id for a single mutant.</p>
 <p>NUL-joined so token delimiters (<code>||=</code>, spaces, <code>::</code>, <code>#</code>) can never collide
-with the separator; <a href="0,12">SHA256</a> gives a fixed-length, copy-pasteable key.</p>
+with the separator; <code>SHA256[0,12]</code> gives a fixed-length, copy-pasteable key.</p>
 
   </div>
 </div>
@@ -941,7 +941,7 @@ normalization the Reporter's <code>diff_for</code> uses for its token label.</p>
 </div>
 
       <div id="footer">
-  Generated on Mon Sep 21 07:52:24 2026 by
+  Generated on DATE by
   <a href="https://yardoc.org" title="Yay! A Ruby Documentation Tool" target="_parent">yard</a>
   0.9.45 (ruby-3.4.10).
 </div>

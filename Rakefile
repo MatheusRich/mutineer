@@ -59,7 +59,7 @@ begin
       desc "Fail unless docs/api matches a fresh YARD build"
       task :check do
         require_relative "rake/yard_pages"
-        abort "docs/api is stale. Run `rake yard:pages`." unless YardPages.current?
+        abort "docs/api is stale. Run `rake yard:pages`." unless YardPages.published_markers? && YardPages.current?
       end
     end
   end

@@ -109,9 +109,11 @@ programmatically, returning an exit status integer (0 = all passed,
 1 = any failure/error).</p>
 <p>Never call this in the parent — it manipulates global Minitest state
 (autorun, runnables) that only makes sense in a throwaway forked child.</p>
-<p>No <code>rescue</code> here: Isolation.run's fork block is the single exception
-boundary (any exception there becomes exit 2). Adding a rescue would
-create a second exit-2 path and break this method's 0/1 return contract.</p>
+<p>A missing minitest is rescued as FrameworkUnavailable (Isolation.run
+still turns that raise into exit 2). There is no rescue around the
+suite run itself: Isolation.run's fork block is the single exception
+boundary for unexpected errors. Swallowing those here would create a
+second exit-2 path and break this method's 0/1 return contract.</p>
 
   </div>
 </div>
@@ -150,7 +152,7 @@ create a second exit-2 path and break this method's 0/1 return contract.</p>
   
 
   
-    <span class="summary_desc"><div class='inline'><p>ponytail: tested via runner_test.rb (U6), not in isolation — a direct unit test would require forking and duplicate isolation_test's coverage.</p></div></span>
+    <span class="summary_desc"><div class='inline'><p>Tested via runner_test.rb, not in isolation — a direct unit test would require forking and duplicate isolation_test's coverage.</p></div></span>
   
 </li>
 
@@ -176,9 +178,9 @@ create a second exit-2 path and break this method's 0/1 return contract.</p>
   
 </h3><div class="docstring">
   <div class="discussion">
-    <p>ponytail: tested via runner_test.rb (U6), not in isolation — a direct
-unit test would require forking and duplicate isolation_test's coverage.</p>
-<p><code>test_files</code> is one path or an Array of paths (M3 coverage selection
+    <p>Tested via runner_test.rb, not in isolation — a direct unit test
+would require forking and duplicate isolation_test's coverage.</p>
+<p><code>test_files</code> is one path or an Array of paths (coverage selection
 passes the covering subset); each is loaded before the single
 Minitest.run.</p>
 
@@ -227,8 +229,6 @@ Minitest.run.</p>
       <pre class="lines">
 
 
-26
-27
 28
 29
 30
@@ -256,10 +256,12 @@ Minitest.run.</p>
 52
 53
 54
-55</pre>
+55
+56
+57</pre>
     </td>
     <td>
-      <pre class="code"><span class="info file"># File 'lib/mutineer/minitest_integration.rb', line 26</span>
+      <pre class="code"><span class="info file"># File 'lib/mutineer/minitest_integration.rb', line 28</span>
 
 <span class='kw'>def</span> <span class='kw'>self</span><span class='period'>.</span><span class='id identifier rubyid_run'>run</span><span class='lparen'>(</span><span class='id identifier rubyid_test_files'>test_files</span><span class='rparen'>)</span>
   <span class='kw'>begin</span>
@@ -301,7 +303,7 @@ Minitest.run.</p>
 </div>
 
       <div id="footer">
-  Generated on Mon Sep 21 07:52:25 2026 by
+  Generated on DATE by
   <a href="https://yardoc.org" title="Yay! A Ruby Documentation Tool" target="_parent">yard</a>
   0.9.45 (ruby-3.4.10).
 </div>

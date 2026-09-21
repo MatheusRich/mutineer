@@ -19,18 +19,30 @@ module YardPages
 
       FileUtils.touch(File.join(OUTPUT, ".nojekyll"))
       FileUtils.touch("docs/.nojekyll")
+      stabilize_html!
+    end
+
+    # True when the site-root Jekyll opt-out and `docs/api/.nojekyll` exist.
+    #
+    # Without the root marker, Pages runs Jekyll and omits `_index.html`.
+    #
+    # @return [Boolean]
+    def published_markers?
+      File.directory?(OUTPUT) &&
+        File.file?("docs/.nojekyll") &&
+        File.file?(File.join(OUTPUT, ".nojekyll"))
     end
 
     # True when committed `docs/api` matches a fresh YARD build.
     #
-    # Generation timestamps and the footer Ruby patch are ignored so the
-    # Linux `rake yard:pages:check` gate stays stable. Do not call this from
-    # the default minitest suite — a full rebuild is slow and still
-    # OS-sensitive (file list / template drift).
+    # Generation timestamps, the YARD gem version, and the footer Ruby
+    # patch are ignored so the Linux `rake yard:pages:check` gate stays
+    # stable. Do not call this from the default minitest suite — a full
+    # rebuild is slow and still OS-sensitive (file list / template drift).
     #
     # @return [Boolean]
     def current?
-      return false unless File.directory?(OUTPUT)
+      return false unless published_markers?
 
       Dir.mktmpdir("yard-pages") do |tmp|
         ok = system("bundle", "exec", "yard", "doc", "--output-dir", tmp)
@@ -70,6 +82,17 @@ module YardPages
     def normalize(text)
       text.gsub(/Generated on .+ by/, "Generated on DATE by")
           .gsub(/\(ruby-\d+\.\d+\.\d+\)/, "(ruby-VERSION)")
+          .gsub(/YARD \d+\.\d+\.\d+/, "YARD X.Y.Z")
+          .gsub(/(>yard<\/a>\s+)\d+\.\d+\.\d+/, "\\1X.Y.Z")
+    end
+
+    # Pin the YARD footer stamp so a regenerate does not rewrite every page.
+    #
+    # @return [void]
+    def stabilize_html!
+      Dir.glob(File.join(OUTPUT, "**/*.html")).each do |path|
+        File.write(path, File.read(path).gsub(/Generated on .+ by/, "Generated on DATE by"))
+      end
     end
   end
 end

@@ -36,14 +36,22 @@ class YardPagesTest < Minitest::Test
     assert_includes spec, '"documentation_uri" => "https://davidteren.github.io/mutineer/"'
   end
 
-  def test_equivalent_ignores_generated_on_stamp_and_ruby_patch
+  def test_published_markers_require_root_and_api_nojekyll
+    assert YardPages.published_markers?
+  end
+
+  def test_equivalent_ignores_stamp_ruby_patch_and_yard_version
     left = <<~HTML
+      <title>Documentation by YARD 0.9.45</title>
       Generated on Mon Sep 21 07:52:23 2026 by
-      yard 0.9.45 (ruby-3.4.10).
+      <a href="https://yardoc.org">yard</a>
+      0.9.45 (ruby-3.4.10).
     HTML
     right = <<~HTML
+      <title>Documentation by YARD 0.9.46</title>
       Generated on Tue Sep 22 01:02:03 2026 by
-      yard 0.9.45 (ruby-3.4.7).
+      <a href="https://yardoc.org">yard</a>
+      0.9.46 (ruby-3.4.7).
     HTML
 
     Dir.mktmpdir("yard-eq") do |dir|
