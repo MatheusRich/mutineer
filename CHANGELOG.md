@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **AI-readable docs wiring**: HTML pages with Markdown twins now advertise
+  `rel="alternate" type="text/markdown"`, `index.md` is the landing/CLI
+  essentials twin, `skill.md` is listed under Optional in `llms.txt`, and
+  `sitemap.xml` is generated from the same catalog as `llms.txt` (#91).
+
 ## [1.0.1] - 2026-09-18
 
 ### Added

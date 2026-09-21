@@ -53,4 +53,19 @@ rescue LoadError
   # YARD is a development dependency; its tasks are simply unavailable without it.
 end
 
+require_relative "rake/site_docs"
+
+namespace :docs do
+  desc "Regenerate sitemap.xml and llms.txt lists from the site catalog"
+  task :generate do
+    MutineerSiteDocs.generate!
+  end
+
+  desc "Fail unless generated site files match a fresh render"
+  task :check do
+    stale = MutineerSiteDocs.stale_files
+    abort "docs:check stale: #{stale.join(', ')}. Run `rake docs:generate`." unless stale.empty?
+  end
+end
+
 task default: :test

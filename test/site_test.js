@@ -4,6 +4,40 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
+const BASE = 'https://davidteren.github.io/mutineer';
+const ALTERNATE = 'rel="alternate" type="text/markdown"';
+
+test('HTML pages with markdown twins advertise rel=alternate', () => {
+  const twins = {
+    'docs/index.html': `${BASE}/index.md`,
+    'docs/agentic-coding.html': `${BASE}/agentic-coding.md`,
+    'docs/json-schema.html': `${BASE}/json-schema.md`
+  };
+  for (const [html, href] of Object.entries(twins)) {
+    const source = fs.readFileSync(html, 'utf8');
+    assert.match(source, new RegExp(ALTERNATE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.match(source, new RegExp(href.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+});
+
+test('index.md landing twin exists and sitemap lists the same Pages URLs as llms.txt', () => {
+  const indexMd = fs.readFileSync('docs/index.md', 'utf8');
+  assert.match(indexMd, /gem install mutineer/);
+  assert.match(indexMd, /mutineer run/);
+  const llms = fs.readFileSync('docs/llms.txt', 'utf8');
+  assert.match(llms, /## Optional/);
+  assert.match(llms, new RegExp(`${BASE}/skill\\.md`));
+  const pagesUrls = [...llms.matchAll(/https:\/\/davidteren\.github\.io\/mutineer[^)\s]*/g)].map((m) => m[0]);
+  pagesUrls.push(`${BASE}/llms.txt`);
+  const sitemap = fs.readFileSync('docs/sitemap.xml', 'utf8');
+  const unique = [...new Set(pagesUrls)];
+  assert.ok(unique.length >= 8, 'llms.txt should list the docs + optional Pages URLs');
+  for (const url of unique) {
+    assert.match(sitemap, new RegExp(`<loc>${url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}</loc>`));
+  }
+});
+
+
 // A small browser boundary checks theme selection and copy feedback without a dependency.
 test('site follows system theme until chosen, tolerates blocked storage, and reports copy failures', async () => {
   for (const saved of [null, 'invalid', 'dark', 'light']) {
