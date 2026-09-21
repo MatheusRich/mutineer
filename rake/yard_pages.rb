@@ -23,7 +23,10 @@ module YardPages
 
     # True when committed `docs/api` matches a fresh YARD build.
     #
-    # Generation timestamps are ignored so the check is stable.
+    # Generation timestamps and the footer Ruby patch are ignored so the
+    # Linux `rake yard:pages:check` gate stays stable. Do not call this from
+    # the default minitest suite — a full rebuild is slow and still
+    # OS-sensitive (file list / template drift).
     #
     # @return [Boolean]
     def current?
@@ -66,6 +69,7 @@ module YardPages
     # @return [String]
     def normalize(text)
       text.gsub(/Generated on .+ by/, "Generated on DATE by")
+          .gsub(/\(ruby-\d+\.\d+\.\d+\)/, "(ruby-VERSION)")
     end
   end
 end

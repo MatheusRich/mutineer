@@ -1,11 +1,18 @@
 # frozen_string_literal: true
 
+require "fileutils"
+require "tmpdir"
+
 require_relative "test_helper"
 require_relative "../rake/site_docs"
 require_relative "../rake/yard_pages"
 require_relative "../lib/mutineer/version"
 
 # #92: published YARD HTML tracks the shipped gem.
+#
+# Freshness against a live `yard doc` rebuild is `rake yard:pages:check`
+# (Linux CI + release), not this suite — a rebuild is slow and macOS YARD
+# HTML can still differ after timestamp/Ruby-patch normalization.
 class YardPagesTest < Minitest::Test
   def test_catalog_lists_the_api_root
     paths = MutineerSiteDocs::CATALOG.map(&:path)
@@ -29,7 +36,38 @@ class YardPagesTest < Minitest::Test
     assert_includes spec, '"documentation_uri" => "https://davidteren.github.io/mutineer/"'
   end
 
-  def test_committed_api_docs_match_a_fresh_yard_build
-    assert YardPages.current?, "docs/api is stale — run `rake yard:pages`"
+  def test_equivalent_ignores_generated_on_stamp_and_ruby_patch
+    left = <<~HTML
+      Generated on Mon Sep 21 07:52:23 2026 by
+      yard 0.9.45 (ruby-3.4.10).
+    HTML
+    right = <<~HTML
+      Generated on Tue Sep 22 01:02:03 2026 by
+      yard 0.9.45 (ruby-3.4.7).
+    HTML
+
+    Dir.mktmpdir("yard-eq") do |dir|
+      a = File.join(dir, "a")
+      b = File.join(dir, "b")
+      FileUtils.mkdir_p([a, b])
+      File.write(File.join(a, "index.html"), left)
+      File.write(File.join(b, "index.html"), right)
+      assert YardPages.equivalent?(a, b)
+    end
+  end
+
+  def test_equivalent_rejects_content_or_file_list_drift
+    Dir.mktmpdir("yard-neq") do |dir|
+      a = File.join(dir, "a")
+      b = File.join(dir, "b")
+      FileUtils.mkdir_p([a, b])
+      File.write(File.join(a, "index.html"), "alpha")
+      File.write(File.join(b, "index.html"), "beta")
+      refute YardPages.equivalent?(a, b)
+
+      File.write(File.join(b, "index.html"), "alpha")
+      File.write(File.join(b, "extra.html"), "x")
+      refute YardPages.equivalent?(a, b)
+    end
   end
 end
