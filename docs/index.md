@@ -64,11 +64,13 @@ Typed flags override `.mutineer.yml`. Full flag list: `mutineer --help` or the [
 
 ## Exit codes
 
+<!-- contract:exit-codes -->
 | Code | Meaning |
 |------|---------|
-| `0` | Score ≥ threshold (or no gate) and no baseline regression |
-| `1` | Tests too weak, run incomplete, baseline regression, or a runtime error |
-| `2` | Usage / invalid-flag error |
+| `0` | Score ≥ threshold (or no gate) **and** no baseline regression. |
+| `1` | Score below `--threshold`, OR nothing could be scored and something broke, or more than one mutant produced no verdict and they exceed 10% of those attempted, OR a `--baseline` regression, OR a runtime error. |
+| `2` | Usage / invalid-flag error (mistyped flag, bad path, unreadable baseline). |
+<!-- /contract:exit-codes -->
 
 ## Operators
 

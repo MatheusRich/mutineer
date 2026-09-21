@@ -129,11 +129,13 @@ human review / suppression rather than looping forever.
 
 ## Reading exit codes in a pipeline
 
-| Code | Pipeline action |
-|------|-----------------|
-| `0` | Pass — score ≥ threshold and no baseline regression. |
-| `1` | Fail the check — tests are too weak (below threshold), the run did not complete (nothing could be scored and something broke, or more than one mutant produced no verdict and they exceed 10% of those attempted), or a regression was introduced. Tell them apart with `summary.score`, `summary.no_verdict / summary.attempted`, and `baseline.regressed`. |
-| `2` | Fail the *job* differently — this is a misinvocation (bad flag/path), not a test-quality signal. |
+<!-- contract:exit-codes -->
+| Code | Meaning |
+|------|---------|
+| `0` | Score ≥ threshold (or no gate) **and** no baseline regression. |
+| `1` | Score below `--threshold`, OR nothing could be scored and something broke, or more than one mutant produced no verdict and they exceed 10% of those attempted, OR a `--baseline` regression, OR a runtime error. |
+| `2` | Usage / invalid-flag error (mistyped flag, bad path, unreadable baseline). |
+<!-- /contract:exit-codes -->
 
 Branch on these directly; never scrape the human report. The JSON `summary` and `baseline` blocks carry
 the same facts for dashboards.
