@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "date"
+require_relative "docs_contract"
 
 # Shared catalog for the GitHub Pages site. `llms.txt` link lists and
 # `sitemap.xml` are generated from this list so they cannot drift.
@@ -114,6 +115,7 @@ module MutineerSiteDocs
     def generate!
       write!("docs/sitemap.xml", sitemap_xml)
       write!("docs/llms.txt", llms_txt(File.read("docs/llms.txt")))
+      DocsContract.generate!
     end
 
     # Paths whose committed bytes differ from a fresh generate.
@@ -126,6 +128,7 @@ module MutineerSiteDocs
       stale = []
       stale << "docs/sitemap.xml" unless sitemap_equivalent?(File.read("docs/sitemap.xml"), sitemap_xml)
       stale << "docs/llms.txt" unless File.read("docs/llms.txt") == llms_txt(File.read("docs/llms.txt"))
+      stale.concat(DocsContract.stale_files)
       stale
     end
 

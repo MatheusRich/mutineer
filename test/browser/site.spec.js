@@ -29,6 +29,8 @@ test('theme, keyboard disclosure, copy and mobile navigation work together', asy
   await page.getByRole('navigation', { name: 'Primary', exact: true }).getByRole('link', { name: 'JSON schema', exact: true }).click();
   await expect(page).toHaveURL(/json-schema.html$/);
   await expect(page.getByRole('region', { name: 'Summary fields', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Exit codes', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Exit codes', exact: true })).toBeVisible();
 });
 
 test('markdown twins and agent entrypoints are served', async ({ request }) => {

@@ -143,16 +143,18 @@ jobs:
       <p>Suppressed mutants leave the score entirely (so 100% stays reachable) and appear under the JSON <code>ignored[]</code> key for auditing. An agent should treat a survivor it cannot kill after N attempts as a candidate for human review / suppression rather than looping forever.</p>
 
       <h2 id="exit-codes">Reading exit codes in a pipeline</h2>
-      <div class="table-wrap" tabindex="0" role="region" aria-label="Reference table">
-        <table>
-          <thead><tr><th scope="col">Code</th><th scope="col">Pipeline action</th></tr></thead>
-          <tbody>
-            <tr><td class="op">0</td><td>Pass — score ≥ threshold and no baseline regression.</td></tr>
-            <tr><td class="op">1</td><td>Fail the check — tests are too weak (below threshold) or a regression was introduced.</td></tr>
-            <tr><td class="op">2</td><td>Fail the <em>job</em> differently — this is a misinvocation (bad flag/path), not a test-quality signal.</td></tr>
-          </tbody>
-        </table>
-      </div>
+      <!-- contract:exit-codes-html -->
+<div class="table-wrap" tabindex="0" role="region" aria-label="Exit codes">
+  <table>
+    <thead><tr><th scope="col">Code</th><th scope="col">Meaning</th></tr></thead>
+    <tbody>
+      <tr><td class="op">0</td><td>Score ≥ threshold (or no gate) <strong>and</strong> no baseline regression.</td></tr>
+              <tr><td class="op">1</td><td>Score below <code>--threshold</code>, OR nothing could be scored and something broke, or more than one mutant produced no verdict and they exceed 10% of those attempted, OR a <code>--baseline</code> regression, OR a runtime error.</td></tr>
+              <tr><td class="op">2</td><td>Usage / invalid-flag error (mistyped flag, bad path, unreadable baseline).</td></tr>
+    </tbody>
+  </table>
+</div>
+<!-- /contract:exit-codes-html -->
       <p>Branch on these directly; never scrape the human report. The JSON <code>summary</code> and <code>baseline</code> blocks carry the same facts for dashboards.</p>
 
       <div class="callout"><span class="ico" aria-hidden="true">→</span><p>The full field-by-field contract lives in the <a href="json-schema.html">JSON schema reference</a>.</p></div>

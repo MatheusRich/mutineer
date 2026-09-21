@@ -70,7 +70,7 @@ end
 require_relative "rake/site_docs"
 
 namespace :docs do
-  desc "Regenerate sitemap.xml and llms.txt lists from the site catalog"
+  desc "Regenerate sitemap, llms.txt lists, llms-full.txt, and contract copies"
   task :generate do
     MutineerSiteDocs.generate!
   end

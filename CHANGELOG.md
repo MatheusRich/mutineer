@@ -11,6 +11,9 @@ All notable changes to this project are documented here. The format is based on
   `rel="alternate" type="text/markdown"`, `index.md` is the landing/CLI
   essentials twin, `skill.md` is listed under Optional in `llms.txt`, and
   `sitemap.xml` is generated from the same catalog as `llms.txt` (#91).
+- **Single-source CLI contract**: exit codes and `--threshold` live in
+  `docs/fragments/contract.yml`; `rake docs:generate` writes `llms-full.txt`,
+  `json-schema.html`, and the marked copies so they cannot drift (#82).
 - **YARD API on Pages**: the current gem's YARD HTML is published at
   `/api/`, linked from the docs site, and `rake yard:pages:check` keeps it
   from lagging the shipped sources. `documentation_uri` stays the Pages
