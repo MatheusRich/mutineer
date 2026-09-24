@@ -10,6 +10,10 @@ All notable changes to this project are documented here. The format is based on
 - **Safe-navigation operator** (Tier-2, opt-in via `--operators`):
   `safe_navigation` replaces `&.` with `.`. The mutant survives when no test
   passes `nil` to the call.
+- **Range operator** (Tier-2, opt-in via `--operators`): `range` replaces
+  `..` with `...` and `...` with `..`. The `..` -> `...` mutant survives when
+  no test checks the last element of the range. Endless ranges (`1..`) are
+  skipped, because `(1..)` and `(1...)` behave the same.
 
 ## [1.0.2] - 2026-09-21
 

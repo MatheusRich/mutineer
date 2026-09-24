@@ -12,6 +12,7 @@ require_relative "mutators/string_literal"
 require_relative "mutators/regex_literal"
 require_relative "mutators/collection_method"
 require_relative "mutators/safe_navigation"
+require_relative "mutators/range_literal"
 
 module Mutineer
   # Maps operator names to operator classes.
@@ -35,14 +36,15 @@ module Mutineer
       "string_literal"     => Mutators::StringLiteral,
       "regex"              => Mutators::RegexLiteral,
       "collection_method"  => Mutators::CollectionMethod,
-      "safe_navigation"    => Mutators::SafeNavigation
+      "safe_navigation"    => Mutators::SafeNavigation,
+      "range"              => Mutators::RangeLiteral
     }.freeze
 
     # The default Tier-1 operator set.
     DEFAULT_NAMES = %w[arithmetic comparison boolean_connector boolean_literal statement_removal].freeze
     # Tier-2 operators that remain opt-in.
     TIER2_NAMES   = %w[return_nil literal_mutation condition_negation string_literal regex collection_method
-                       safe_navigation].freeze
+                       safe_navigation range].freeze
 
     # Short human-readable descriptions for each operator.
     DESCRIPTIONS = {
@@ -57,7 +59,8 @@ module Mutineer
       "string_literal"     => "non-empty string -> \"\", empty string -> \"mutineer\"",
       "regex"              => "drop leading ^ / trailing $, swap + <-> *",
       "collection_method"  => "map<->each, all?<->any?, first<->last, min<->max, select<->reject",
-      "safe_navigation"    => "&. -> ."
+      "safe_navigation"    => "&. -> .",
+      "range"              => ".. <-> ..."
     }.freeze
 
     # Resolves operator names to classes.
