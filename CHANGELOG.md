@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- **Tests that reopen `$stdout`** (Minitest's `capture_subprocess_io`,
+  RSpec's `to_stdout_from_any_process`) no longer make a green suite
+  "not green" or count as false kills.
+
 ## [1.0.2] - 2026-09-21
 
 ### Added

@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "stringio"
-
 module Mutineer
   # Child-process-only: loads a test file in the current process and runs it
   # programmatically, returning an exit status integer (0 = all passed,
@@ -45,13 +43,24 @@ module Mutineer
       # Drop runnables inherited from the parent suite (this is the child's
       # private copy — the parent is unaffected) so only the target test runs.
       Minitest::Runnable.reset
+      # Saved before the test files load: a file may reassign $stdout.
+      orig_stdout = $stdout
       Array(test_files).each { |f| load f }
 
-      orig = $stdout
       # Silence the child's test output; the parent only cares about pass/fail.
-      $stdout = StringIO.new
-      passed = Minitest.run([])
-      $stdout = orig
+      # Reopen fd 1 through STDOUT instead of swapping in a StringIO: a test
+      # that calls `$stdout.reopen` (e.g. capture_subprocess_io) needs a real
+      # IO, and $stdout itself may already be a StringIO that a test left.
+      saved_fd = STDOUT.dup
+      begin
+        STDOUT.reopen(File::NULL)
+        $stdout = STDOUT
+        passed = Minitest.run([])
+      ensure
+        STDOUT.reopen(saved_fd)
+        saved_fd.close
+        $stdout = orig_stdout
+      end
 
       passed ? 0 : 1
     end

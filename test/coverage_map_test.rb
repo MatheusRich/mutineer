@@ -11,6 +11,14 @@ class CoverageMapTest < Minitest::Test
   CALC        = File.expand_path("fixtures/calculator.rb", __dir__)
   STRONG_TEST = File.expand_path("fixtures/calculator_strong_test.rb", __dir__)
   WEAK_TEST   = File.expand_path("fixtures/calculator_weak_test.rb", __dir__)
+  # Wraps each assertion in capture_subprocess_io, which reopens $stdout.
+  SUBPROCESS_IO_TEST = File.expand_path("fixtures/calculator_subprocess_io_test.rb", __dir__)
+  # Leaves $stdout as a StringIO, at load time and inside a test.
+  STDOUT_SWAP_TEST = File.expand_path("fixtures/calculator_stdout_swap_test.rb", __dir__)
+  RSPEC_CALC = File.expand_path("fixtures/rspec/calculator.rb", __dir__)
+  RSPEC_STDOUT_SWAP_SPEC = File.expand_path("fixtures/rspec/calculator_stdout_swap_spec.rb", __dir__)
+  # Wraps each expectation in to_stdout_from_any_process, which reopens $stdout.
+  RSPEC_SUBPROCESS_IO_SPEC = File.expand_path("fixtures/rspec/calculator_subprocess_io_spec.rb", __dir__)
   # Exercises only #add, so #modulo's line is uncovered (the M4 strong suite
   # now covers every method, so it can no longer demonstrate no-coverage).
   ADD_ONLY_TEST = File.expand_path("fixtures/calculator_add_only_test.rb", __dir__)
@@ -45,6 +53,77 @@ class CoverageMapTest < Minitest::Test
     map = build([STRONG_TEST, WEAK_TEST]) # both call #add
     assert_equal %w[test/fixtures/calculator_strong_test.rb test/fixtures/calculator_weak_test.rb].sort,
                  map.tests_for(CALC, line_of("a + b")).sort
+  end
+
+  def test_capture_passes_for_test_that_reopens_stdout
+    map = build([SUBPROCESS_IO_TEST])
+    assert_empty map.failed_clean_tests
+    assert_equal ["test/fixtures/calculator_subprocess_io_test.rb"],
+                 map.tests_for(CALC, line_of("a + b"))
+  end
+
+  def test_warm_cache_clean_check_passes_for_test_that_reopens_stdout
+    cache = Dir.mktmpdir("mutineer-cache")
+    build([SUBPROCESS_IO_TEST], cache_dir: cache)
+    assert_empty build([SUBPROCESS_IO_TEST], cache_dir: cache).failed_clean_tests
+  end
+
+  def test_rspec_capture_and_clean_check_pass_for_spec_that_reopens_stdout
+    cache = Dir.mktmpdir("mutineer-cache")
+    build = lambda do
+      Mutineer::CoverageMap.new(
+        source_paths: [RSPEC_CALC], test_paths: [RSPEC_SUBPROCESS_IO_SPEC],
+        cache_dir: cache, project_root: ROOT, framework: "rspec"
+      ).build_or_load
+    end
+    cold = build.call
+    assert_empty cold.failed_clean_tests, "cold capture"
+    assert_empty cold.failed_test_files, "cold capture"
+    add_line = File.read(RSPEC_CALC).lines.index { |l| l.include?("a + b") } + 1
+    assert_equal ["test/fixtures/rspec/calculator_subprocess_io_spec.rb"],
+                 cold.tests_for(RSPEC_CALC, add_line)
+    assert_empty build.call.failed_clean_tests, "warm-cache clean check"
+  end
+
+  # Two or more test files also run together in one clean-check script.
+  def test_combined_clean_check_passes_for_test_that_reopens_stdout
+    assert_empty build([SUBPROCESS_IO_TEST, WEAK_TEST]).failed_clean_tests
+  end
+
+  def test_rspec_combined_clean_check_passes_for_spec_that_reopens_stdout
+    map = Mutineer::CoverageMap.new(
+      source_paths: [RSPEC_CALC],
+      test_paths: [RSPEC_SUBPROCESS_IO_SPEC, File.expand_path("fixtures/rspec/calculator_weak_spec.rb", __dir__)],
+      cache_dir: Dir.mktmpdir("mutineer-cache"), project_root: ROOT, framework: "rspec"
+    ).build_or_load
+    assert_empty map.failed_clean_tests
+  end
+
+  def test_capture_and_clean_checks_pass_for_test_that_swaps_stdout_for_a_stringio
+    cache = Dir.mktmpdir("mutineer-cache")
+    cold = build([STDOUT_SWAP_TEST], cache_dir: cache)
+    assert_empty cold.failed_test_files, "cold capture"
+    assert_empty cold.failed_clean_tests, "cold capture"
+    assert_equal ["test/fixtures/calculator_stdout_swap_test.rb"], cold.tests_for(CALC, line_of("a + b"))
+    assert_empty build([STDOUT_SWAP_TEST], cache_dir: cache).failed_clean_tests, "warm-cache clean check"
+    assert_empty build([STDOUT_SWAP_TEST, WEAK_TEST]).failed_clean_tests, "combined clean check"
+  end
+
+  def test_rspec_capture_and_clean_checks_pass_for_spec_that_swaps_stdout_for_a_stringio
+    cache = Dir.mktmpdir("mutineer-cache")
+    build = lambda do |specs, dir|
+      Mutineer::CoverageMap.new(
+        source_paths: [RSPEC_CALC], test_paths: specs,
+        cache_dir: dir, project_root: ROOT, framework: "rspec"
+      ).build_or_load
+    end
+    cold = build.call([RSPEC_STDOUT_SWAP_SPEC], cache)
+    assert_empty cold.failed_test_files, "cold capture"
+    assert_empty cold.failed_clean_tests, "cold capture"
+    assert_empty build.call([RSPEC_STDOUT_SWAP_SPEC], cache).failed_clean_tests, "warm-cache clean check"
+    weak = File.expand_path("fixtures/rspec/calculator_weak_spec.rb", __dir__)
+    assert_empty build.call([RSPEC_STDOUT_SWAP_SPEC, weak], Dir.mktmpdir("mutineer-cache")).failed_clean_tests,
+                 "combined clean check"
   end
 
   def test_failing_test_file_is_skipped_without_aborting

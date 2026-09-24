@@ -533,12 +533,12 @@ module Mutineer
       loads = Array(test_paths).map { |t| "load #{absolute(t).inspect}" }.join("\n")
       <<~RUBY
         require "minitest"
-        require "stringio"
         def Minitest.autorun; end
         $LOAD_PATH.unshift(*#{abs_load_paths.inspect})
         #{abs_source_paths.inspect}.each { |f| load f }
         #{loads}
-        $stdout = StringIO.new
+        STDOUT.reopen(File::NULL)
+        $stdout = STDOUT
         exit(Minitest.run([]) ? 0 : 1)
       RUBY
     end
@@ -560,8 +560,8 @@ module Mutineer
         RSpec::Core::Runner.disable_autorun!
         $LOAD_PATH.unshift(*#{abs_load_paths.inspect})
         #{abs_source_paths.inspect}.each { |f| load f }
+        STDOUT.reopen(File::NULL)
         _sink = StringIO.new
-        $stdout = _sink
         status = RSpec::Core::Runner.run(["--no-color", #{specs}], _sink, _sink)
         exit(status.zero? ? 0 : 1)
       RUBY
@@ -592,12 +592,12 @@ module Mutineer
         $LOAD_PATH.unshift(*#{abs_load_paths.inspect})
         #{abs_source_paths.inspect}.each { |f| load f }
         load #{absolute(test_path).inspect}
-        _orig = $stdout
-        $stdout = StringIO.new
+        _json_out = STDOUT.dup
+        STDOUT.reopen(File::NULL)
+        $stdout = STDOUT
         _passed = Minitest.run([])
-        $stdout = _orig
-        puts JSON.generate("passed" => _passed == true, "coverage" => Coverage.result,
-                           "loaded_files" => #{loaded_files_expression})
+        _json_out.puts JSON.generate("passed" => _passed == true, "coverage" => Coverage.result,
+                                     "loaded_files" => #{loaded_files_expression})
       RUBY
     end
 
@@ -621,13 +621,12 @@ module Mutineer
         Coverage.start(lines: true)
         $LOAD_PATH.unshift(*#{abs_load_paths.inspect})
         #{abs_source_paths.inspect}.each { |f| load f }
-        _orig = $stdout
+        _json_out = STDOUT.dup
+        STDOUT.reopen(File::NULL)
         _sink = StringIO.new
-        $stdout = _sink
         _status = RSpec::Core::Runner.run(["--no-color", #{absolute(test_path).inspect}], _sink, _sink)
-        $stdout = _orig
-        puts JSON.generate("passed" => _status.zero?, "coverage" => Coverage.result,
-                           "loaded_files" => #{loaded_files_expression})
+        _json_out.puts JSON.generate("passed" => _status.zero?, "coverage" => Coverage.result,
+                                     "loaded_files" => #{loaded_files_expression})
       RUBY
     end
 

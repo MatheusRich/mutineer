@@ -34,6 +34,23 @@ class RSpecIntegrationTest < Minitest::Test
     assert_equal :arithmetic, survivor.mutation.operator
   end
 
+  # A spec that reopens $stdout (to_stdout_from_any_process) must see the same
+  # verdicts as the plain weak spec: no "not green" abort, no false kills.
+  def test_spec_that_reopens_stdout_scores_like_weak_spec
+    result = run_mutineer(tests: ["test/fixtures/rspec/calculator_subprocess_io_spec.rb"])
+    assert_equal 1, result.survived_count
+    assert_equal 1, result.killed_count
+    assert_equal "add", result.surviving_mutants.first.subject.name.to_s
+  end
+
+  # A spec file that leaves $stdout/$stderr as StringIOs must not break the
+  # silencing that the reopen fix added.
+  def test_spec_that_swaps_stdout_for_a_stringio_scores_like_weak_spec
+    result = run_mutineer(tests: ["test/fixtures/rspec/calculator_stdout_swap_spec.rb"])
+    assert_equal 1, result.survived_count
+    assert_equal 1, result.killed_count
+  end
+
   # #96: RSpec assertion failures on the unmutated suite abort before scoring.
   def test_failing_spec_aborts_before_scoring
     Dir.mktmpdir("mutineer-rspec-clean") do |dir|

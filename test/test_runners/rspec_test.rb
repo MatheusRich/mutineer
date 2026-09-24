@@ -12,24 +12,38 @@ class TestRunnersRSpecTest < Minitest::Test
   FIX  = File.expand_path("../fixtures/rspec", __dir__)
   PASS = File.join(FIX, "passing_spec.rb")
   FAIL = File.join(FIX, "failing_spec.rb")
+  # Wraps each expectation in to_stdout_from_any_process, which reopens $stdout.
+  SUBPROCESS_IO = File.join(FIX, "calculator_subprocess_io_spec.rb")
+  NOISY = File.join(FIX, "noisy_spec.rb")
+  # Leaves $stdout and $stderr as StringIOs, at load time and inside an example.
+  STDOUT_SWAP = File.join(FIX, "calculator_stdout_swap_spec.rb")
 
-  # Returns [exitstatus, captured_real_stdout]. The block runs in the child and
-  # returns the integer exit code.
+  # Returns [exitstatus, captured_real_stdout, captured_real_stderr]. The block
+  # runs in the child and returns the integer exit code.
   def in_fork
     rd, wr = IO.pipe
+    err_rd, err_wr = IO.pipe
     pid = fork do
       rd.close
+      err_rd.close
       $stdout.reopen(wr) # capture anything written to the real fd 1
+      $stderr.reopen(err_wr) # and to the real fd 2
       code = yield
       $stdout.flush
+      $stderr.flush
       wr.close
+      err_wr.close
       exit!(code)
     end
     wr.close
+    err_wr.close
+    err_reader = Thread.new { err_rd.read }
     out = rd.read
+    err = err_reader.value
     rd.close
+    err_rd.close
     _, status = Process.waitpid2(pid)
-    [status.exitstatus, out]
+    [status.exitstatus, out, err]
   end
 
   def test_passing_spec_returns_zero_and_is_silent
@@ -41,6 +55,31 @@ class TestRunnersRSpecTest < Minitest::Test
   def test_failing_spec_returns_one
     code, = in_fork { Mutineer::TestRunners::RSpec.run([FAIL]) }
     assert_equal 1, code
+  end
+
+  def test_spec_that_reopens_stdout_returns_zero_and_is_silent
+    code, out = in_fork { Mutineer::TestRunners::RSpec.run([SUBPROCESS_IO]) }
+    assert_equal 0, code
+    assert_empty out.strip, "RSpec output should be silenced, got: #{out.inspect}"
+  end
+
+  def test_spec_output_is_silenced_on_both_streams
+    code, out, err = in_fork { Mutineer::TestRunners::RSpec.run([NOISY]) }
+    assert_equal 0, code
+    refute_includes out, "NOISE-ON-STDOUT"
+    refute_includes err, "NOISE-ON-STDERR"
+  end
+
+  def test_spec_that_swaps_streams_for_stringios_returns_zero_and_restores
+    code, out, err = in_fork do
+      status = Mutineer::TestRunners::RSpec.run([STDOUT_SWAP])
+      $stdout.puts "AFTER-RUN"
+      $stderr.puts "AFTER-RUN-ERR"
+      status
+    end
+    assert_equal 0, code
+    assert_equal "AFTER-RUN\n", out
+    assert_includes err, "AFTER-RUN-ERR"
   end
 
   # Run two different specs sequentially in ONE process; RSpec.reset (inside the

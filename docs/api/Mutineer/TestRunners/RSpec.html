@@ -194,16 +194,16 @@ return 0 (all passed) or 1 (any failure).</p>
       <pre class="lines">
 
 
-44
-45
-46
-47
-48
-49
-50</pre>
+56
+57
+58
+59
+60
+61
+62</pre>
     </td>
     <td>
-      <pre class="code"><span class="info file"># File 'lib/mutineer/test_runners/rspec.rb', line 44</span>
+      <pre class="code"><span class="info file"># File 'lib/mutineer/test_runners/rspec.rb', line 56</span>
 
 <span class='kw'>def</span> <span class='kw'>self</span><span class='period'>.</span><span class='id identifier rubyid_require_rspec!'>require_rspec!</span>
   <span class='id identifier rubyid_require'>require</span> <span class='tstring'><span class='tstring_beg'>&quot;</span><span class='tstring_content'>rspec/core</span><span class='tstring_end'>&quot;</span></span>
@@ -294,7 +294,19 @@ return 0 (all passed) or 1 (any failure).</p>
 36
 37
 38
-39</pre>
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51</pre>
     </td>
     <td>
       <pre class="code"><span class="info file"># File 'lib/mutineer/test_runners/rspec.rb', line 20</span>
@@ -306,13 +318,25 @@ return 0 (all passed) or 1 (any failure).</p>
   <span class='op'>::</span><span class='const'>RSpec</span><span class='period'>.</span><span class='id identifier rubyid_reset'>reset</span>
 
   <span class='id identifier rubyid_sink'>sink</span> <span class='op'>=</span> <span class='const'>StringIO</span><span class='period'>.</span><span class='id identifier rubyid_new'>new</span>
-  <span class='id identifier rubyid_orig_out'>orig_out</span> <span class='op'>=</span> <span class='gvar'>$stdout</span>
+  <span class='comment'># Reopen fds 1 and 2 through STDOUT/STDERR instead of swapping in a
+</span>  <span class='comment'># StringIO: a spec that calls `$stdout.reopen` (e.g.
+</span>  <span class='comment'># to_stdout_from_any_process) needs a real IO, and $stdout itself may
+</span>  <span class='comment'># already be a StringIO that a spec left.
+</span>  <span class='id identifier rubyid_orig_out'>orig_out</span> <span class='op'>=</span> <span class='gvar'>$stdout</span>
   <span class='id identifier rubyid_orig_err'>orig_err</span> <span class='op'>=</span> <span class='gvar'>$stderr</span>
-  <span class='gvar'>$stdout</span> <span class='op'>=</span> <span class='id identifier rubyid_sink'>sink</span>
-  <span class='gvar'>$stderr</span> <span class='op'>=</span> <span class='id identifier rubyid_sink'>sink</span>
+  <span class='id identifier rubyid_saved_out'>saved_out</span> <span class='op'>=</span> <span class='const'>STDOUT</span><span class='period'>.</span><span class='id identifier rubyid_dup'>dup</span>
+  <span class='id identifier rubyid_saved_err'>saved_err</span> <span class='op'>=</span> <span class='const'>STDERR</span><span class='period'>.</span><span class='id identifier rubyid_dup'>dup</span>
   <span class='kw'>begin</span>
+    <span class='const'>STDOUT</span><span class='period'>.</span><span class='id identifier rubyid_reopen'>reopen</span><span class='lparen'>(</span><span class='const'>File</span><span class='op'>::</span><span class='const'>NULL</span><span class='rparen'>)</span>
+    <span class='const'>STDERR</span><span class='period'>.</span><span class='id identifier rubyid_reopen'>reopen</span><span class='lparen'>(</span><span class='const'>File</span><span class='op'>::</span><span class='const'>NULL</span><span class='rparen'>)</span>
+    <span class='gvar'>$stdout</span> <span class='op'>=</span> <span class='const'>STDOUT</span>
+    <span class='gvar'>$stderr</span> <span class='op'>=</span> <span class='const'>STDERR</span>
     <span class='id identifier rubyid_status'>status</span> <span class='op'>=</span> <span class='op'>::</span><span class='const'>RSpec</span><span class='op'>::</span><span class='const'>Core</span><span class='op'>::</span><span class='const'>Runner</span><span class='period'>.</span><span class='id identifier rubyid_run'>run</span><span class='lparen'>(</span><span class='lbracket'>[</span><span class='tstring'><span class='tstring_beg'>&quot;</span><span class='tstring_content'>--no-color</span><span class='tstring_end'>&quot;</span></span><span class='comma'>,</span> <span class='op'>*</span><span class='const'>Array</span><span class='lparen'>(</span><span class='id identifier rubyid_spec_files'>spec_files</span><span class='rparen'>)</span><span class='rbracket'>]</span><span class='comma'>,</span> <span class='id identifier rubyid_sink'>sink</span><span class='comma'>,</span> <span class='id identifier rubyid_sink'>sink</span><span class='rparen'>)</span>
   <span class='kw'>ensure</span>
+    <span class='const'>STDOUT</span><span class='period'>.</span><span class='id identifier rubyid_reopen'>reopen</span><span class='lparen'>(</span><span class='id identifier rubyid_saved_out'>saved_out</span><span class='rparen'>)</span>
+    <span class='const'>STDERR</span><span class='period'>.</span><span class='id identifier rubyid_reopen'>reopen</span><span class='lparen'>(</span><span class='id identifier rubyid_saved_err'>saved_err</span><span class='rparen'>)</span>
+    <span class='id identifier rubyid_saved_out'>saved_out</span><span class='period'>.</span><span class='id identifier rubyid_close'>close</span>
+    <span class='id identifier rubyid_saved_err'>saved_err</span><span class='period'>.</span><span class='id identifier rubyid_close'>close</span>
     <span class='gvar'>$stdout</span> <span class='op'>=</span> <span class='id identifier rubyid_orig_out'>orig_out</span>
     <span class='gvar'>$stderr</span> <span class='op'>=</span> <span class='id identifier rubyid_orig_err'>orig_err</span>
   <span class='kw'>end</span>
@@ -331,7 +355,7 @@ return 0 (all passed) or 1 (any failure).</p>
       <div id="footer">
   Generated on DATE by
   <a href="https://yardoc.org" title="Yay! A Ruby Documentation Tool" target="_parent">yard</a>
-  0.9.45 (ruby-3.4.10).
+  0.9.45 (ruby-3.4.9).
 </div>
 
     </div>
