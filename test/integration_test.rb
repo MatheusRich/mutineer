@@ -118,6 +118,17 @@ class IntegrationTest < Minitest::Test
     assert_equal 4, result.killed_count
   end
 
+  # A test file that prints at load time must not corrupt the coverage result
+  # that the capture subprocess sends back, so no mutant becomes unscoreable.
+  def test_suite_that_prints_at_load_time_scores_like_weak_suite
+    result = run_mutineer(sources: ["test/fixtures/calculator.rb"],
+                        tests: ["test/fixtures/calculator_load_time_puts_test.rb"])
+
+    assert_equal 2, result.survived_count
+    assert_equal 4, result.killed_count
+    assert_equal %w[add subtract], result.surviving_mutants.map { |r| r.subject.name.to_s }.sort
+  end
+
   # #97: changing only a required helper must not leave a stale no_coverage
   # verdict. Cached and fresh runs report the same survivor.
   def test_helper_change_matches_fresh_coverage

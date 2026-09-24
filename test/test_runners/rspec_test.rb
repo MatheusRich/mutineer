@@ -3,11 +3,14 @@
 require_relative "../test_helper"
 
 # The RSpec runner mirrors the Minitest runner's contract: 0 = all passed,
-# 1 = any failure, output silenced, and RSpec state reset between runs so
-# examples never bleed across successive invocations in one process.
+# 1 = any failure, RSpec's formatter output kept off stdout, and RSpec state
+# reset between runs so examples never bleed across successive invocations in
+# one process.
 #
 # Each case forks (mirroring real per-mutant isolation); the child reopens its
-# real stdout to a pipe so we can prove the runner silenced RSpec's formatter.
+# real stdout to a pipe so we can prove the runner kept RSpec's formatter off
+# it. Spec output is silenced at the fork boundary, not by the runner (see the
+# Isolation.run case below).
 class TestRunnersRSpecTest < Minitest::Test
   FIX  = File.expand_path("../fixtures/rspec", __dir__)
   PASS = File.join(FIX, "passing_spec.rb")
@@ -63,23 +66,21 @@ class TestRunnersRSpecTest < Minitest::Test
     assert_empty out.strip, "RSpec output should be silenced, got: #{out.inspect}"
   end
 
-  def test_spec_output_is_silenced_on_both_streams
-    code, out, err = in_fork { Mutineer::TestRunners::RSpec.run([NOISY]) }
-    assert_equal 0, code
+  # The fork boundary (Isolation.run) silences the spec's stdout. Stderr
+  # passes through, because it also carries mutineer's own child diagnostics.
+  def test_spec_stdout_is_silenced_at_the_fork_boundary_and_stderr_passes_through
+    result = nil
+    out, err = capture_subprocess_io do
+      result = Mutineer::Isolation.run { Mutineer::TestRunners::RSpec.run([NOISY]) }
+    end
+    assert_predicate result, :survived?
     refute_includes out, "NOISE-ON-STDOUT"
-    refute_includes err, "NOISE-ON-STDERR"
+    assert_includes err, "NOISE-ON-STDERR"
   end
 
-  def test_spec_that_swaps_streams_for_stringios_returns_zero_and_restores
-    code, out, err = in_fork do
-      status = Mutineer::TestRunners::RSpec.run([STDOUT_SWAP])
-      $stdout.puts "AFTER-RUN"
-      $stderr.puts "AFTER-RUN-ERR"
-      status
-    end
+  def test_spec_that_swaps_streams_for_stringios_returns_zero
+    code, = in_fork { Mutineer::TestRunners::RSpec.run([STDOUT_SWAP]) }
     assert_equal 0, code
-    assert_equal "AFTER-RUN\n", out
-    assert_includes err, "AFTER-RUN-ERR"
   end
 
   # Run two different specs sequentially in ONE process; RSpec.reset (inside the
