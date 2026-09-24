@@ -63,7 +63,7 @@ module Mutineer
       "collection_method"  => "map<->each, all?<->any?, first<->last, min<->max, select<->reject",
       "safe_navigation"    => "&. -> .",
       "range"              => ".. <-> ...",
-      "negation_removal"   => "!x -> x"
+      "negation_removal"   => "!x, not x -> x"
     }.freeze
 
     # Resolves operator names to classes.
