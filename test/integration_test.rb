@@ -67,6 +67,11 @@ class IntegrationTest < Minitest::Test
                          operator: :range, subject: "upto", token: "..", replacement: "...")
   end
 
+  def test_negation_removal_survivor
+    assert_sole_survivor(source: "test/fixtures/access.rb", test: "test/fixtures/access_test.rb",
+                         operator: :negation_removal, subject: "guest?", token: "!", replacement: "")
+  end
+
   # Scenario B — calculator + strong, perfect score (R10)
   def test_calculator_strong_kills_all
     result = run_mutineer(sources: ["test/fixtures/calculator.rb"],

@@ -73,6 +73,10 @@ passes <code>nil</code> to the call.</li>
 <code>..</code> with <code>...</code> and <code>...</code> with <code>..</code>. The <code>..</code> -&gt; <code>...</code> mutant survives when
 no test checks the last element of the range. Endless ranges (<code>1..</code>) are
 skipped, because <code>(1..)</code> and <code>(1...)</code> behave the same.</li>
+<li><strong>Negation-removal operator</strong> (Tier-2, opt-in via <code>--operators</code>):
+<code>negation_removal</code> removes the <code>!</code> from <code>!x</code> and the <code>not</code> from <code>not x</code>.
+The mutant survives when no test depends on the negated value. The
+explicit form <code>x.!</code> is skipped, because <code>x.</code> does not parse.</li>
 </ul>
 <h2 id="_1_0_2____2026_09_21"><a href="https://github.com/davidteren/mutineer/releases/tag/v1.0.2">1.0.2</a> - 2026-09-21</h2>
 <h3 id="Added">Added</h3>

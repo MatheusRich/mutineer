@@ -14,6 +14,10 @@ All notable changes to this project are documented here. The format is based on
   `..` with `...` and `...` with `..`. The `..` -> `...` mutant survives when
   no test checks the last element of the range. Endless ranges (`1..`) are
   skipped, because `(1..)` and `(1...)` behave the same.
+- **Negation-removal operator** (Tier-2, opt-in via `--operators`):
+  `negation_removal` removes the `!` from `!x` and the `not` from `not x`.
+  The mutant survives when no test depends on the negated value. The
+  explicit form `x.!` is skipped, because `x.` does not parse.
 
 ## [1.0.2] - 2026-09-21
 
