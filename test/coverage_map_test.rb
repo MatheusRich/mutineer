@@ -13,6 +13,8 @@ class CoverageMapTest < Minitest::Test
   WEAK_TEST   = File.expand_path("fixtures/calculator_weak_test.rb", __dir__)
   # Wraps each assertion in capture_subprocess_io, which reopens $stdout.
   SUBPROCESS_IO_TEST = File.expand_path("fixtures/calculator_subprocess_io_test.rb", __dir__)
+  # Leaves a spawned and a forked process running for 60s after its test.
+  BACKGROUND_PROCESS_TEST = File.expand_path("fixtures/calculator_background_process_test.rb", __dir__)
   # Leaves $stdout as a StringIO, at load time and inside a test.
   STDOUT_SWAP_TEST = File.expand_path("fixtures/calculator_stdout_swap_test.rb", __dir__)
   # Prints from the top level of the file, before any test runs.
@@ -65,6 +67,27 @@ class CoverageMapTest < Minitest::Test
     assert_empty map.failed_clean_tests
     assert_equal ["test/fixtures/calculator_subprocess_io_test.rb"],
                  map.tests_for(CALC, line_of("a + b"))
+  end
+
+  # A process that a test leaves running inherits the child's fds. It must not
+  # hold up the capture or the clean checks until it exits.
+  def test_build_does_not_wait_for_processes_that_a_test_leaves_running
+    pid_file = File.join(Dir.mktmpdir, "pids")
+    ENV["MUTINEER_BACKGROUND_PIDS"] = pid_file
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    cache = Dir.mktmpdir("mutineer-cache")
+    cold = build([BACKGROUND_PROCESS_TEST, WEAK_TEST], cache_dir: cache) # capture + combined check
+    warm = build([BACKGROUND_PROCESS_TEST, WEAK_TEST], cache_dir: cache) # cached clean check
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+
+    assert_empty cold.failed_clean_tests
+    refute warm.phase_a_ran, "second build must be a cache hit"
+    assert_empty warm.failed_clean_tests
+    assert_includes cold.tests_for(CALC, line_of("a + b")), "test/fixtures/calculator_background_process_test.rb"
+    assert_operator elapsed, :<, 30, "build waited for the leftover processes"
+  ensure
+    ENV.delete("MUTINEER_BACKGROUND_PIDS")
+    File.readlines(pid_file).each { |pid| Process.kill(:KILL, pid.to_i) rescue nil } if pid_file && File.exist?(pid_file) # rubocop:disable Style/RescueModifier
   end
 
   def test_warm_cache_clean_check_passes_for_test_that_reopens_stdout
