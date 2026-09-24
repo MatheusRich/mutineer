@@ -93,7 +93,9 @@ class CoverageMapTest < Minitest::Test
   def test_warm_cache_clean_check_passes_for_test_that_reopens_stdout
     cache = Dir.mktmpdir("mutineer-cache")
     build([SUBPROCESS_IO_TEST], cache_dir: cache)
-    assert_empty build([SUBPROCESS_IO_TEST], cache_dir: cache).failed_clean_tests
+    warm = build([SUBPROCESS_IO_TEST], cache_dir: cache)
+    refute warm.phase_a_ran, "second build must be a cache hit"
+    assert_empty warm.failed_clean_tests
   end
 
   def test_rspec_capture_and_clean_check_pass_for_spec_that_reopens_stdout
@@ -110,7 +112,9 @@ class CoverageMapTest < Minitest::Test
     add_line = File.read(RSPEC_CALC).lines.index { |l| l.include?("a + b") } + 1
     assert_equal ["test/fixtures/rspec/calculator_subprocess_io_spec.rb"],
                  cold.tests_for(RSPEC_CALC, add_line)
-    assert_empty build.call.failed_clean_tests, "warm-cache clean check"
+    warm = build.call
+    refute warm.phase_a_ran, "second build must be a cache hit"
+    assert_empty warm.failed_clean_tests, "warm-cache clean check"
   end
 
   # Two or more test files also run together in one clean-check script.
@@ -133,7 +137,9 @@ class CoverageMapTest < Minitest::Test
     assert_empty cold.failed_test_files, "cold capture"
     assert_empty cold.failed_clean_tests, "cold capture"
     assert_equal ["test/fixtures/calculator_stdout_swap_test.rb"], cold.tests_for(CALC, line_of("a + b"))
-    assert_empty build([STDOUT_SWAP_TEST], cache_dir: cache).failed_clean_tests, "warm-cache clean check"
+    warm = build([STDOUT_SWAP_TEST], cache_dir: cache)
+    refute warm.phase_a_ran, "second build must be a cache hit"
+    assert_empty warm.failed_clean_tests, "warm-cache clean check"
     assert_empty build([STDOUT_SWAP_TEST, WEAK_TEST]).failed_clean_tests, "combined clean check"
   end
 
@@ -148,7 +154,9 @@ class CoverageMapTest < Minitest::Test
     cold = build.call([RSPEC_STDOUT_SWAP_SPEC], cache)
     assert_empty cold.failed_test_files, "cold capture"
     assert_empty cold.failed_clean_tests, "cold capture"
-    assert_empty build.call([RSPEC_STDOUT_SWAP_SPEC], cache).failed_clean_tests, "warm-cache clean check"
+    warm = build.call([RSPEC_STDOUT_SWAP_SPEC], cache)
+    refute warm.phase_a_ran, "second build must be a cache hit"
+    assert_empty warm.failed_clean_tests, "warm-cache clean check"
     weak = File.expand_path("fixtures/rspec/calculator_weak_spec.rb", __dir__)
     assert_empty build.call([RSPEC_STDOUT_SWAP_SPEC, weak], Dir.mktmpdir("mutineer-cache")).failed_clean_tests,
                  "combined clean check"

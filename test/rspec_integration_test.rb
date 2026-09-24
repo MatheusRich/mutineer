@@ -49,6 +49,7 @@ class RSpecIntegrationTest < Minitest::Test
     result = run_mutineer(tests: ["test/fixtures/rspec/calculator_stdout_swap_spec.rb"])
     assert_equal 1, result.survived_count
     assert_equal 1, result.killed_count
+    assert_equal "add", result.surviving_mutants.first.subject.name.to_s
   end
 
   # A spec file or a source file that prints at load time must not corrupt the

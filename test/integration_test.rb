@@ -102,6 +102,7 @@ class IntegrationTest < Minitest::Test
     end
 
     run.call
+    assert File.exist?(File.join(cache, "coverage.json")), "first run must leave a cache for the second"
     result = run.call
 
     assert_equal 2, result.survived_count
