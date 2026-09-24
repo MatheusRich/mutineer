@@ -75,9 +75,10 @@ sends its result over a separate pipe, not over stdout.</li>
 </ul>
 <h3 id="Changed">Changed</h3>
 <ul>
-<li><strong>Stderr of tests and specs is visible.</strong> Mutineer silences stdout once per
-child process and no longer hides stderr, so its own child diagnostics
-always reach you.</li>
+<li><strong>Stderr of tests and specs is visible</strong> in the in-process and <code>--daemon</code>
+runs. Mutineer silences stdout once per child process and no longer hides
+stderr, so its own child diagnostics always reach you. <code>--test-command</code>
+runs still capture stderr with stdout and show it under <code>--verbose</code>.</li>
 </ul>
 <h2 id="_1_0_2____2026_09_21"><a href="https://github.com/davidteren/mutineer/releases/tag/v1.0.2">1.0.2</a> - 2026-09-21</h2>
 <h3 id="Added">Added</h3>
@@ -506,7 +507,7 @@ accepted as deprecated aliases.)</li>
       <div id="footer">
   Generated on DATE by
   <a href="https://yardoc.org" title="Yay! A Ruby Documentation Tool" target="_parent">yard</a>
-  0.9.45 (ruby-3.4.9).
+  0.9.45 (ruby-3.4.10).
 </div>
 
     </div>

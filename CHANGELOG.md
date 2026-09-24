@@ -15,9 +15,10 @@ All notable changes to this project are documented here. The format is based on
   sends its result over a separate pipe, not over stdout.
 
 ### Changed
-- **Stderr of tests and specs is visible.** Mutineer silences stdout once per
-  child process and no longer hides stderr, so its own child diagnostics
-  always reach you.
+- **Stderr of tests and specs is visible** in the in-process and `--daemon`
+  runs. Mutineer silences stdout once per child process and no longer hides
+  stderr, so its own child diagnostics always reach you. `--test-command`
+  runs still capture stderr with stdout and show it under `--verbose`.
 
 ## [1.0.2] - 2026-09-21
 
