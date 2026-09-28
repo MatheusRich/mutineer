@@ -40,6 +40,10 @@ All notable changes to this project are documented here. The format is based on
   the mutated file again; `--strategy redefine` runs it.
   Code that guards itself to run once (`unless defined?(X)`) can now show as
   covered, so its mutants run where they were `no_coverage` before.
+- **A red unmutated suite now shows why it failed** — in a standalone run, the
+  Minitest summary or RSpec output of the failing test, with its failure
+  message, goes to stderr before the "not green" error. A passing run prints
+  nothing extra. Boot mode (`--rails`, `--boot`) is unchanged (#121).
 
 ## [1.1.0] - 2026-09-28
 

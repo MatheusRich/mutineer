@@ -100,6 +100,10 @@ A mutant of such a class still errors under <code>--strategy reload</code>, whic
 the mutated file again; <code>--strategy redefine</code> runs it.
 Code that guards itself to run once (<code>unless defined?(X)</code>) can now show as
 covered, so its mutants run where they were <code>no_coverage</code> before.</li>
+<li><strong>A red unmutated suite now shows why it failed</strong> — in a standalone run, the
+Minitest summary or RSpec output of the failing test, with its failure
+message, goes to stderr before the &quot;not green&quot; error. A passing run prints
+nothing extra. Boot mode (<code>--rails</code>, <code>--boot</code>) is unchanged (#121).</li>
 </ul>
 <h2 id="_1_1_0____2026_09_28"><a href="https://github.com/davidteren/mutineer/releases/tag/v1.1.0">1.1.0</a> - 2026-09-28</h2>
 <h3 id="Added">Added</h3>
