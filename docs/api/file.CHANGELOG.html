@@ -93,6 +93,13 @@ captures failed now exits 1 instead of reporting N/A (#119).</li>
 reason written without <code>--</code> became part of the operator name, so the marker
 suppressed nothing and said nothing (#124). A marker followed only by spaces
 or commas, such as <code>disable-line  -- why</code>, now disables the whole line.</li>
+<li><strong>Coverage capture and the clean check run each source once</strong> — they read
+sources with <code>load</code>, so a test's own <code>require</code> ran them again: a <code>Struct</code>
+superclass raised <code>superclass mismatch</code>, and load-time code ran twice (#122).
+A mutant of such a class still errors under <code>--strategy reload</code>, which loads
+the mutated file again; <code>--strategy redefine</code> runs it.
+Code that guards itself to run once (<code>unless defined?(X)</code>) can now show as
+covered, so its mutants run where they were <code>no_coverage</code> before.</li>
 </ul>
 <h2 id="_1_1_0____2026_09_28"><a href="https://github.com/davidteren/mutineer/releases/tag/v1.1.0">1.1.0</a> - 2026-09-28</h2>
 <h3 id="Added">Added</h3>

@@ -33,6 +33,13 @@ All notable changes to this project are documented here. The format is based on
   reason written without `--` became part of the operator name, so the marker
   suppressed nothing and said nothing (#124). A marker followed only by spaces
   or commas, such as `disable-line  -- why`, now disables the whole line.
+- **Coverage capture and the clean check run each source once** — they read
+  sources with `load`, so a test's own `require` ran them again: a `Struct`
+  superclass raised `superclass mismatch`, and load-time code ran twice (#122).
+  A mutant of such a class still errors under `--strategy reload`, which loads
+  the mutated file again; `--strategy redefine` runs it.
+  Code that guards itself to run once (`unless defined?(X)`) can now show as
+  covered, so its mutants run where they were `no_coverage` before.
 
 ## [1.1.0] - 2026-09-28
 
