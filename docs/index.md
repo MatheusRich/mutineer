@@ -79,7 +79,7 @@ Default (Tier 1): `arithmetic`, `comparison`, `boolean_connector`, `boolean_lite
 
 Tier 2 (off until `--operators`): `return_nil`, `literal_mutation`, `condition_negation`,
 `string_literal`, `regex`, `collection_method`, `safe_navigation`, `range`,
-`negation_removal`.
+`negation_removal`, `chain_link`.
 
 `mutineer --list-operators` prints the live set.
 
