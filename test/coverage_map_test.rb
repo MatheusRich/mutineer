@@ -786,6 +786,36 @@ class CoverageMapTest < Minitest::Test
     end
   end
 
+  def test_failing_test_prefix_file_marks_its_source_uncapturable
+    bad = File.join(Dir.mktmpdir, "test_calculator.rb")
+    File.write(bad, "require 'does/not/exist'\n")
+    map = nil
+    capture_subprocess_io { map = build([bad]) }
+    assert map.uncapturable_source?(CALC)
+  end
+
+  def test_failing_test_with_both_affixes_pairs_by_its_suffix
+    bad = File.join(Dir.mktmpdir, "test_calculator_test.rb") # pairs with test_calculator.rb
+    File.write(bad, "require 'does/not/exist'\n")
+    map = nil
+    capture_subprocess_io { map = build([bad]) }
+    refute map.uncapturable_source?(CALC)
+  end
+
+  def test_failing_test_helper_does_not_taint_a_helper_source
+    dir = Dir.mktmpdir
+    helper = File.join(dir, "helper.rb")
+    File.write(helper, "class Helper; end\n")
+    bad = File.join(dir, "test_helper.rb")
+    File.write(bad, "require 'does/not/exist'\n")
+    map = nil
+    capture_subprocess_io do
+      map = Mutineer::CoverageMap.new(source_paths: [helper], test_paths: [bad],
+                                      cache_dir: File.join(dir, "cache"), project_root: dir).build_or_load
+    end
+    refute map.uncapturable_source?(helper)
+  end
+
   def test_capture_and_clean_check_run_a_source_once
     Dir.mktmpdir do |dir|
       src = File.join(dir, "once.rb")

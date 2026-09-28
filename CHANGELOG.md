@@ -20,6 +20,13 @@ All notable changes to this project are documented here. The format is based on
   `%i[a b]`, with `[]`. The mutant survives when no test checks the contents
   of the array. The operator skips an implicit array (`x = 1, 2`), an array
   that holds a heredoc, and nested method definitions.
+- **Sources also pair with Minitest's `test/**/test_*.rb` files** — after the
+  `_test.rb` forms, so existing projects pair as before. `lib/helper.rb` does
+  not pair with the `test/test_helper.rb` support file. A failed capture of a
+  `test_<name>.rb` file now marks `<name>.rb` uncapturable, as `<name>_test.rb`
+  does (#120). Without `framework:` set, a source with `spec/<name>_spec.rb`
+  and `test/test_<name>.rb` but no `<name>_test.rb` now pairs with the
+  Minitest file, as the "Minitest first" order says.
 
 ### Fixed
 - **`reload` loads the mutant by an absolute path** — a relative source path

@@ -79,6 +79,13 @@ definitions, because mutineer mutates each one as its own method.</li>
 <code>%i[a b]</code>, with <code>[]</code>. The mutant survives when no test checks the contents
 of the array. The operator skips an implicit array (<code>x = 1, 2</code>), an array
 that holds a heredoc, and nested method definitions.</li>
+<li><strong>Sources also pair with Minitest's <code>test/**/test_*.rb</code> files</strong> — after the
+<code>_test.rb</code> forms, so existing projects pair as before. <code>lib/helper.rb</code> does
+not pair with the <code>test/test_helper.rb</code> support file. A failed capture of a
+<code>test_&lt;name&gt;.rb</code> file now marks <code>&lt;name&gt;.rb</code> uncapturable, as <code>&lt;name&gt;_test.rb</code>
+does (#120). Without <code>framework:</code> set, a source with <code>spec/&lt;name&gt;_spec.rb</code>
+and <code>test/test_&lt;name&gt;.rb</code> but no <code>&lt;name&gt;_test.rb</code> now pairs with the
+Minitest file, as the &quot;Minitest first&quot; order says.</li>
 </ul>
 <h3 id="Fixed">Fixed</h3>
 <ul>
