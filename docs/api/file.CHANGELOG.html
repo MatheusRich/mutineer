@@ -85,6 +85,10 @@ that holds a heredoc, and nested method definitions.</li>
 <li><strong><code>reload</code> loads the mutant by an absolute path</strong> — a relative source path
 gave the mutant relative backtrace paths, so code that checks its own frames
 by absolute path failed for every mutant, a false kill (#123).</li>
+<li><strong><code>require &quot;test_helper&quot;</code> works without <code>RUBYOPT</code></strong> — a standalone run puts
+<code>lib</code>, then each test file's <code>test_helper.rb</code> directory, on the load path,
+as boot mode and <code>rake test</code> do. A run where no test records coverage because
+captures failed now exits 1 instead of reporting N/A (#119).</li>
 </ul>
 <h2 id="_1_1_0____2026_09_28"><a href="https://github.com/davidteren/mutineer/releases/tag/v1.1.0">1.1.0</a> - 2026-09-28</h2>
 <h3 id="Added">Added</h3>
