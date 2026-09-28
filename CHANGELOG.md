@@ -6,13 +6,14 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
-### Fixed
-- **Tests that reopen `$stdout`** (Minitest's `capture_subprocess_io`,
-  RSpec's `to_stdout_from_any_process`) no longer make a green suite
-  "not green" or count as false kills.
-- **Test or source files that print while they load** no longer make coverage
-  capture fail with `invalid coverage output`. The capture subprocess now
-  sends its result over a separate pipe, not over stdout.
+### Added
+- **Safe-navigation operator** (Tier-2, opt-in via `--operators`):
+  `safe_navigation` replaces `&.` with `.`. The mutant survives when no test
+  passes `nil` to the call.
+- **Range operator** (Tier-2, opt-in via `--operators`): `range` replaces
+  `..` with `...` and `...` with `..`. The `..` -> `...` mutant survives when
+  no test checks the last element of the range. Endless ranges (`1..`) are
+  skipped, because `(1..)` and `(1...)` behave the same.
 
 ### Changed
 - **Stderr of tests and specs is visible** in the in-process and `--daemon`
@@ -60,6 +61,14 @@ All notable changes to this project are documented here. The format is based on
   queued tests still run. The verdict is the same as before. Below the
   Rails threshold, the tests run one after the other in the child, and the
   stop works.
+
+### Fixed
+- **Tests that reopen `$stdout`** (Minitest's `capture_subprocess_io`,
+  RSpec's `to_stdout_from_any_process`) no longer make a green suite
+  "not green" or count as false kills.
+- **Test or source files that print while they load** no longer make coverage
+  capture fail with `invalid coverage output`. The capture subprocess now
+  sends its result over a separate pipe, not over stdout.
 
 ## [1.0.2] - 2026-09-21
 
