@@ -29,6 +29,10 @@ All notable changes to this project are documented here. The format is based on
   `lib`, then each test file's `test_helper.rb` directory, on the load path,
   as boot mode and `rake test` do. A run where no test records coverage because
   captures failed now exits 1 instead of reporting N/A (#119).
+- **A disable-line marker warns about an operator it does not know** — a
+  reason written without `--` became part of the operator name, so the marker
+  suppressed nothing and said nothing (#124). A marker followed only by spaces
+  or commas, such as `disable-line  -- why`, now disables the whole line.
 
 ## [1.1.0] - 2026-09-28
 

@@ -316,7 +316,7 @@ safe parallelism instead (see <a href="#faster-parallel-safe-rails-the---daemon-
 <p>Some mutants are equivalent (behaviour-identical) and survive forever — keeping a
 file off 100%. Suppress them so the score and <code>--threshold</code> gate stay meaningful:</p>
 <ul>
-<li><strong>Inline:</strong> <code>some_line # mutineer:disable-line</code> (or scope it: <code># mutineer:disable-line comparison</code>).</li>
+<li><strong>Inline:</strong> <code>some_line # mutineer:disable-line</code> (or scope it: <code># mutineer:disable-line comparison</code>). Put a reason after <code>--</code>: <code># mutineer:disable-line comparison -- the test checks only 20</code>.</li>
 <li><strong>Config:</strong> a <code>.mutineer.yml</code> <code>ignore:</code> list of stable mutant ids. Each survivor's
 <code>id</code> is printed in the JSON report, so copy it straight into <code>ignore:</code>.</li>
 </ul>

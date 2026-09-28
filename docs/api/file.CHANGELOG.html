@@ -89,6 +89,10 @@ by absolute path failed for every mutant, a false kill (#123).</li>
 <code>lib</code>, then each test file's <code>test_helper.rb</code> directory, on the load path,
 as boot mode and <code>rake test</code> do. A run where no test records coverage because
 captures failed now exits 1 instead of reporting N/A (#119).</li>
+<li><strong>A disable-line marker warns about an operator it does not know</strong> — a
+reason written without <code>--</code> became part of the operator name, so the marker
+suppressed nothing and said nothing (#124). A marker followed only by spaces
+or commas, such as <code>disable-line  -- why</code>, now disables the whole line.</li>
 </ul>
 <h2 id="_1_1_0____2026_09_28"><a href="https://github.com/davidteren/mutineer/releases/tag/v1.1.0">1.1.0</a> - 2026-09-28</h2>
 <h3 id="Added">Added</h3>
