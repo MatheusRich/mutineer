@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **Operand-removal operator** (Tier-2, opt-in via `--operators`):
+  `operand_removal` replaces `a && b` with `(a)` and with `(b)`, and does the
+  same for `||`, `and` and `or`. The mutant survives when no test needs the
+  operand that the mutant removes. The operator never keeps a jump operand
+  (`return`, `break`, `next`, `redo`, `retry`) alone, because a jump does not
+  parse in a value context. It never removes an operand that holds a heredoc,
+  because the heredoc body stays behind as code. It skips nested method
+  definitions, because mutineer mutates each one as its own method.
+
 ## [1.1.0] - 2026-09-28
 
 ### Added
