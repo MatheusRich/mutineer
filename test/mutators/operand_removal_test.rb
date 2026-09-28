@@ -23,6 +23,14 @@ class OperandRemovalTest < Minitest::Test
     end
   end
 
+  def test_twin_mutants_get_distinct_ids
+    source = "def m\n  a && b\nend\n"
+    subject = subject_for(source)
+    mutations = Mutineer::Mutators::OperandRemoval.new.mutations_for(subject, source)
+    ids = Mutineer::MutantId.for_subject(subject, source, mutations)
+    assert_equal 2, ids.uniq.size
+  end
+
   def test_or_keeps_each_operand
     mutations, = run_mutator("a || b")
     assert_equal ["(a)", "(b)"], mutations.map(&:replacement)
