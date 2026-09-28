@@ -13,7 +13,8 @@ All notable changes to this project are documented here. The format is based on
 - **Range operator** (Tier-2, opt-in via `--operators`): `range` replaces
   `..` with `...` and `...` with `..`. The `..` -> `...` mutant survives when
   no test checks the last element of the range. Endless ranges (`1..`) are
-  skipped, because `(1..)` and `(1...)` behave the same.
+  skipped, because `(1..)` and `(1...)` give the same result for slicing,
+  `include?`, `===` and pattern matching.
 - **Negation-removal operator** (Tier-2, opt-in via `--operators`):
   `negation_removal` removes the `!` from `!x` and the `not` from `not x`.
   The mutant survives when no test depends on the negated value. The
