@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require "stringio"
 require_relative "minitest_integration/stop_at_first_failure"
 
 module Mutineer
@@ -56,19 +55,18 @@ module Mutineer
       Array(test_files).each { |f| load f }
 
       args = []
-      if stop_at_first_failure
-        StopAtFirstFailure.arm!(Minitest::Runnable.runnables)
+      if stop_at_first_failure && StopAtFirstFailure.arm!(Minitest::Runnable.runnables)
+        # Pin the seed only when the stop is armed; an unknown Minitest shape
+        # gets the normal full, randomly ordered run.
         args = ["--seed", STOP_AT_FIRST_FAILURE_SEED.to_s] unless ENV["SEED"]
       end
-      orig = $stdout
-      # Silence the child's test output; the parent only cares about pass/fail.
-      $stdout = StringIO.new
+      # No silencing here: the fork boundary that calls this method has already
+      # pointed stdout at File::NULL (see ChildStdout).
       passed = Minitest.run(args)
 
       # A plugin can replace the summary reporter, so a stop decides by itself.
       passed && !StopAtFirstFailure.stopped_here? ? 0 : 1
     ensure
-      $stdout = orig if orig
       StopAtFirstFailure.disarm!
     end
   end

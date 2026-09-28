@@ -33,7 +33,7 @@ jobs:
     # The default Gemfile keeps Minitest 5. The stop at the first failure has
     # separate hooks for Minitest 5 and 6, so each major version needs a run.
     env:
-      BUNDLE_GEMFILE: gemfiles/minitest6.gemfile
+      BUNDLE_GEMFILE: ${{ github.workspace }}/gemfiles/minitest6.gemfile
     steps:
       - uses: actions/checkout@v7
       - uses: ruby/setup-ruby@v1

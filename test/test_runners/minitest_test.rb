@@ -19,9 +19,17 @@ class TestRunnersMinitestTest < Minitest::Test
   LATER    = File.join(FIX, "stop_at_first_failure_later_class_test.rb")
   NESTED   = File.join(FIX, "stop_at_first_failure_nested_run_test.rb")
 
-  # Like Isolation.run: an escaped exception is exit 2, never a false 1.
+  # Wraps each assertion in capture_subprocess_io, which reopens $stdout.
+  SUBPROCESS_IO = File.join(FIX, "calculator_subprocess_io_test.rb")
+  # Leaves $stdout as a StringIO, at load time and inside a test.
+  STDOUT_SWAP = File.join(FIX, "calculator_stdout_swap_test.rb")
+
+  # The child silences stdout first, as every real fork boundary does (see
+  # Mutineer::ChildStdout). Like Isolation.run, an escaped exception is exit 2,
+  # never a false 1.
   def fork_status
     pid = fork do
+      Mutineer::ChildStdout.silence
       code = begin
         yield
       rescue Exception # rubocop:disable Lint/RescueException
@@ -53,6 +61,14 @@ class TestRunnersMinitestTest < Minitest::Test
 
   def test_passing_suite_returns_zero
     assert_equal 0, fork_status { Mutineer::TestRunners::Minitest.run([PASSING]) }
+  end
+
+  def test_suite_that_reopens_stdout_returns_zero
+    assert_equal 0, fork_status { Mutineer::TestRunners::Minitest.run([SUBPROCESS_IO]) }
+  end
+
+  def test_suite_that_swaps_stdout_for_a_stringio_returns_zero
+    assert_equal 0, fork_status { Mutineer::TestRunners::Minitest.run([STDOUT_SWAP]) }
   end
 
   def test_failing_suite_returns_one
