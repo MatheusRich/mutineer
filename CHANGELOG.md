@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **Safe-navigation operator** (Tier-2, opt-in via `--operators`):
+  `safe_navigation` replaces `&.` with `.`. The mutant survives when no test
+  passes `nil` to the call.
+
+### Changed
+- **Stderr of tests and specs is visible** in the in-process and `--daemon`
+  runs. Mutineer silences stdout once per child process and no longer hides
+  stderr, so its own child diagnostics always reach you. `--test-command`
+  runs still capture stderr with stdout and show it under `--verbose`.
+
 ### Fixed
 - **Tests that reopen `$stdout`** (Minitest's `capture_subprocess_io`,
   RSpec's `to_stdout_from_any_process`) no longer make a green suite
@@ -13,12 +24,6 @@ All notable changes to this project are documented here. The format is based on
 - **Test or source files that print while they load** no longer make coverage
   capture fail with `invalid coverage output`. The capture subprocess now
   sends its result over a separate pipe, not over stdout.
-
-### Changed
-- **Stderr of tests and specs is visible** in the in-process and `--daemon`
-  runs. Mutineer silences stdout once per child process and no longer hides
-  stderr, so its own child diagnostics always reach you. `--test-command`
-  runs still capture stderr with stdout and show it under `--verbose`.
 
 ## [1.0.2] - 2026-09-21
 
