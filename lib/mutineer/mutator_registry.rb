@@ -17,6 +17,7 @@ require_relative "mutators/negation_removal"
 require_relative "mutators/chain_link"
 require_relative "mutators/operand_removal"
 require_relative "mutators/array_literal"
+require_relative "mutators/operator_assignment"
 
 module Mutineer
   # Maps operator names to operator classes.
@@ -45,7 +46,8 @@ module Mutineer
       "negation_removal"   => Mutators::NegationRemoval,
       "chain_link"         => Mutators::ChainLink,
       "operand_removal"    => Mutators::OperandRemoval,
-      "array_literal"      => Mutators::ArrayLiteral
+      "array_literal"      => Mutators::ArrayLiteral,
+      "operator_assignment" => Mutators::OperatorAssignment
     }.freeze
 
     # The default Tier-1 operator set.
@@ -53,7 +55,7 @@ module Mutineer
     # Tier-2 operators that remain opt-in.
     TIER2_NAMES   = %w[return_nil literal_mutation condition_negation string_literal regex collection_method
                        safe_navigation range negation_removal
-                       chain_link operand_removal array_literal].freeze
+                       chain_link operand_removal array_literal operator_assignment].freeze
 
     # Short human-readable descriptions for each operator.
     DESCRIPTIONS = {
@@ -73,7 +75,8 @@ module Mutineer
       "negation_removal"   => "!x, not x -> x",
       "chain_link"         => "drop one call from a chain: a.b.c -> a.c",
       "operand_removal"    => "a && b -> a, b",
-      "array_literal"      => "[a, b] -> []"
+      "array_literal"      => "[a, b] -> []",
+      "operator_assignment" => "+= <-> -=, *= <-> /=, %= -> *=, **= -> *="
     }.freeze
 
     # Resolves operator names to classes.

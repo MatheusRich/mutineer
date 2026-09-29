@@ -109,6 +109,11 @@ class IntegrationTest < Minitest::Test
                          operator: :array_literal, subject: "defaults", token: "%w[ruby rails]", replacement: "[]")
   end
 
+  def test_operator_assignment_survivor
+    assert_sole_survivor(source: "test/fixtures/tally.rb", test: "test/fixtures/tally_test.rb",
+                         operator: :operator_assignment, subject: "sum", token: "+=", replacement: "-=")
+  end
+
   # Scenario B — calculator + strong, perfect score (R10)
   def test_calculator_strong_kills_all
     result = run_mutineer(sources: ["test/fixtures/calculator.rb"],
