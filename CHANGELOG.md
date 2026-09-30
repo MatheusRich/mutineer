@@ -13,6 +13,21 @@ All notable changes to this project are documented here. The format is based on
   that the site builds, in place of `rake yard:pages:check`. The site keeps
   its URLs (#153).
 
+### Fixed
+- **A mutant in a nested method counts once** — a `def` inside another
+  method is a subject of its own, but most operators also emitted its
+  mutants on the outer method. The same edit then counted twice in the
+  score, with two ids. Every operator now stops at a nested `def`, and the
+  mutant stays on the inner method only. A `def` inside `class << obj` is
+  not a subject when `obj` is not `self`, so its mutants stay on the outer
+  method. A mutant id includes an ordinal among the mutants with the same
+  operator and token in a subject. When the duplicates leave the outer
+  method, the ordinals of its own mutants change. An old duplicate id can
+  then name a different, real mutant on the outer method. An `ignore:`
+  entry or a baseline entry with that id then applies to that other mutant,
+  with no warning. If your code has nested methods, regenerate the
+  `ignore:` entries and the baseline for the outer methods (#157).
+
 ## [1.3.0] - 2026-09-29
 
 ### Changed
