@@ -76,7 +76,7 @@ module Mutineer
       "chain_link"         => "drop one call from a chain: a.b.c -> a.c",
       "operand_removal"    => "a && b -> a, b",
       "array_literal"      => "[a, b] -> []",
-      "operator_assignment" => "+= <-> -=, *= <-> /=, %= -> *=, **= -> *="
+      "operator_assignment" => "+= <-> -=, *= <-> /=, %= -> *=, **= -> *= (not ||=, &&=)"
     }.freeze
 
     # Resolves operator names to classes.

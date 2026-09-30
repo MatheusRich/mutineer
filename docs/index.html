@@ -199,7 +199,7 @@
             <tr><td class="op">chain_link</td><td class="rule">drop one call from a chain: a.b.c → a.c</td><td><span class="pill t2">tier 2</span></td></tr>
             <tr><td class="op">operand_removal</td><td class="rule">a &amp;&amp; b → a , b</td><td><span class="pill t2">tier 2</span></td></tr>
             <tr><td class="op">array_literal</td><td class="rule">[a, b] → []</td><td><span class="pill t2">tier 2</span></td></tr>
-            <tr><td class="op">operator_assignment</td><td class="rule">+= ↔ −= , *= ↔ /= , %= → *= , **= → *=</td><td><span class="pill t2">tier 2</span></td></tr>
+            <tr><td class="op">operator_assignment</td><td class="rule">+= ↔ −= , *= ↔ /= , %= → *= , **= → *= (not ||= , &amp;&amp;=)</td><td><span class="pill t2">tier 2</span></td></tr>
           </tbody>
         </table>
       </div>

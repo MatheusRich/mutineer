@@ -129,6 +129,11 @@ class OperatorAssignmentTest < Minitest::Test
     end
   end
 
+  def test_nested_def_skipped
+    mutations, = run_mutator("def inner\n    t += 1\n  end")
+    assert_empty mutations
+  end
+
   def test_every_form_round_trips
     ["t += 1", "t -= 1", "t *= 2", "t /= 2", "t %= 2", "t **= 2", "@t += 1", "@@t -= 1",
      "$t *= 2", "T /= 2", "A::T %= 2", "::T **= 2", "a.b += 1", "a&.b -= 1", "a[i] *= 2",

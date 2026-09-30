@@ -3,10 +3,10 @@
 require "minitest/autorun"
 require_relative "tally"
 
-# Deliberately sums only an empty list. So the `+=` -> `-=` mutation
-# survives undetected.
+# Deliberately checks only the type of the sum. The block runs, so the
+# `+=` -> `-=` mutation executes, but it survives undetected.
 class TallyTest < Minitest::Test
-  def test_sum_of_nothing_is_zero
-    assert_equal 0, Tally.new.sum([])
+  def test_sum_is_an_integer
+    assert_kind_of Integer, Tally.new.sum([1, 2])
   end
 end
