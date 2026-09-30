@@ -56,6 +56,10 @@ module Mutineer
     end
 
     # Returns the stdout of `git -C <root> diff --unified=0 <ref> -- <file>`.
+    # A file that is not in the index has no usable diff, so `new_file_diff`
+    # supplies one that marks every line new. That includes a file the ref still
+    # has, deleted and then written again: git prints only a deletion hunk for it.
+    # Paths are literal, so a name such as `file[1].rb` is not read as a glob.
     #
     # A failure is warned, never silent: an empty result means "no changed
     # lines", which under `--since` removes every mutant for the file — a green
@@ -67,14 +71,42 @@ module Mutineer
     # @return [String] diff text, or `""` on failure (after a stderr warning).
     def git_diff(ref, abs_file, project_root)
       out, _err, status = Open3.capture3(
-        "git", "-C", project_root, "diff", "--unified=0", ref, "--", abs_file
+        "git", "--literal-pathspecs", "-C", project_root, "diff", "--unified=0", ref, "--", abs_file
       )
-      return out if status.success?
+      return(indexed?(abs_file, project_root) ? out : new_file_diff(abs_file)) if status.success?
 
       warn "[mutineer] git diff failed for #{abs_file}; its lines will not be mutated (--since)"
       ""
     rescue StandardError => e
       warn "[mutineer] git diff failed for #{abs_file} (#{e.class}); its lines will not be mutated (--since)"
+      ""
+    end
+
+    # Tells whether the index holds the file. Only then is git's own diff the
+    # truth; the diff text cannot tell, because a mode-only diff must stay empty.
+    #
+    # @param abs_file [String] absolute path of the file being diffed.
+    # @param project_root [String] repository root for `git -C`.
+    # @return [Boolean] true when the index holds the file.
+    def indexed?(abs_file, project_root)
+      _out, _err, known = Open3.capture3(
+        "git", "--literal-pathspecs", "-C", project_root, "ls-files", "--error-unmatch", "--", abs_file
+      )
+      known.success?
+    end
+
+    # Returns a diff that marks a file as entirely new. It returns `""` when
+    # the file is empty or cannot be read (after a warning). A file outside the
+    # index has every line new; read as "unchanged", `--since` would score
+    # nothing and a positive threshold would still exit 0.
+    #
+    # @param abs_file [String] absolute path of the file being diffed.
+    # @return [String] a one-hunk diff header, or `""`.
+    def new_file_diff(abs_file)
+      count = File.foreach(abs_file).count
+      count.zero? ? "" : "@@ -0,0 +1,#{count} @@\n"
+    rescue SystemCallError => e
+      warn "[mutineer] cannot read #{abs_file} (#{e.class}); its lines will not be mutated (--since)"
       ""
     end
   end

@@ -41,6 +41,10 @@ All notable changes to this project are documented here. The format is based on
   `--baseline-epsilon abc` no longer become `1` and `0.0`. One option schema
   parses each value once, where it enters, for both the command line and
   `.mutineer.yml`.
+- **`--since` keeps a source file that git does not track yet** (#156). Before,
+  such a file counted as unchanged. The run scored no mutants, and a positive
+  `--threshold` still exited 0. The file is now new in full, so all its
+  mutants run.
 
 ### Changed
 - **These now exit 2 with a message that names the option**: `jobs: 1.9` or
