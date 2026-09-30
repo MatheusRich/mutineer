@@ -90,4 +90,35 @@ class YardPagesTest < Minitest::Test
       refute YardPages.equivalent?(a, b)
     end
   end
+
+  def test_changelog_headings_keep_aliases_and_stable_release_anchors
+    Dir.mktmpdir("yard-headings") do |dir|
+      path = File.join(dir, "file.CHANGELOG.html")
+      File.write(path, <<~HTML)
+        <h2 id="release_1_4">1.4</h2><h3 id="Added">Added</h3>
+        <h2 id="release_1_3">1.3</h2><h3 id="Added">Added</h3>
+        <h3 id="Changed">Changed</h3>
+        <h2 id="release_1_2">1.2</h2><h3 id="Changed">Changed</h3>
+        <h3 id="id">id</h3>
+      HTML
+      original = File.read(path)
+      YardPages.send(:stabilize_html!, dir)
+      html = File.read(path)
+      assert_includes html, 'id="Added"'
+      assert_includes html, 'id="release_1_4-Added"'
+      assert_includes html, 'id="release_1_3-Added"'
+      assert_includes html, 'id="release_1_3-Changed"'
+      assert_includes html, 'id="release_1_2-Changed"'
+      assert_includes html, '<h3 id="release_1_2-id">'
+      ids = html.scan(/\bid="([^"]+)"/).flatten
+      assert_equal ids.uniq, ids
+      YardPages.send(:stabilize_html!, dir)
+      assert_equal html, File.read(path), "a second pass must preserve anchors"
+      File.write(path, '<h2 id="Unreleased">Unreleased</h2><h3 id="Added">Added</h3>' + original)
+      YardPages.send(:stabilize_html!, dir)
+      assert_includes File.read(path), 'id="release_1_4-Added"', "new releases must not move release anchors"
+      ids = File.read(path).scan(/\bid="([^"]+)"/).flatten
+      assert_equal ids.uniq, ids
+    end
+  end
 end

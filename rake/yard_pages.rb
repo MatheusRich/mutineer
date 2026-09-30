@@ -75,7 +75,30 @@ module YardPages
     # @return [void]
     def stabilize_html!(output_dir)
       Dir.glob(File.join(output_dir, "**/*.html")).each do |path|
-        File.write(path, File.read(path).gsub(/Generated on .+ by/, "Generated on DATE by"))
+        html = File.read(path).gsub(/Generated on .+ by/, "Generated on DATE by")
+        html = unique_changelog_headings(html) if File.basename(path) == "file.CHANGELOG.html"
+        File.write(path, html)
+      end
+    end
+
+    # Qualify subsection anchors by release and retain the first short alias.
+    # YARD's Markdown renderer otherwise gives every Added/Fixed heading the same id.
+    #
+    # @param html [String] generated changelog page.
+    # @return [String] HTML with unique subsection ids.
+    def unique_changelog_headings(html)
+      seen = {}
+      release = nil
+      html.gsub(/<h([23]) id="([^"]+)">/) do |heading|
+        level, id = Regexp.last_match.captures
+        release = id if level == "2"
+        if level == "3" && release && !id.start_with?("#{release}-")
+          alias_anchor = seen[id] ? "" : %(<a id="#{id}"></a>)
+          seen[id] = true
+          alias_anchor + %(<h3 id="#{release}-#{id}">)
+        else
+          heading
+        end
       end
     end
   end

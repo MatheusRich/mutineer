@@ -3,6 +3,9 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const os = require('node:os');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const BASE = 'https://davidteren.github.io/mutineer';
 const ALTERNATE = 'rel="alternate" type="text/markdown"';
@@ -10,6 +13,57 @@ const ALTERNATE = 'rel="alternate" type="text/markdown"';
 // sitemap.xml) are Pages build artifacts, not committed — run
 // `bundle exec rake site:build` before this suite.
 const SITE = '_site';
+
+test('built pages have valid local links and unique anchors, including the API', () => {
+  const result = spawnSync('python3', ['test/site_links.py', SITE], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.error?.message || result.stderr || result.stdout);
+});
+
+test('link checker rejects files outside the published tree and root-absolute URLs', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mutineer-site-links-'));
+  try {
+    const site = path.join(directory, 'site');
+    fs.mkdirSync(site);
+    fs.writeFileSync(path.join(directory, 'outside.txt'), 'This file is not published.');
+    fs.writeFileSync(path.join(site, 'index.html'), '<a href="../outside.txt">outside</a>');
+    const result = spawnSync('python3', ['test/site_links.py', site], { encoding: 'utf8' });
+    assert.equal(result.status, 1, result.error?.message || result.stdout);
+    assert.match(result.stderr, /outside site/);
+    fs.writeFileSync(path.join(site, 'inside.txt'), 'This file is published under /mutineer/.');
+    fs.writeFileSync(path.join(site, 'index.html'), '<a href="/inside.txt">wrong origin path</a>');
+    const absolute = spawnSync('python3', ['test/site_links.py', site], { encoding: 'utf8' });
+    assert.equal(absolute.status, 1, absolute.error?.message || absolute.stdout);
+    assert.match(absolute.stderr, /root-absolute URL/);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('link checker rejects a missing file, fragment or site URL, and a duplicate anchor', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mutineer-site-links-'));
+  try {
+    fs.writeFileSync(path.join(directory, 'page.html'), '<h2 id="here">here</h2>');
+    const cases = {
+      'missing file': '<a href="gone.html">x</a>',
+      'missing fragment': '<a href="page.html#nowhere">x</a>',
+      'duplicate anchor': '<a href="page.html">x</a><p id="twice"></p><p id="twice"></p>',
+      'missing file.*davidteren': `<a href="${BASE}/gone.html">x</a>`,
+      'missing fragment.*davidteren': `<a href="${BASE}/page.html#nowhere">x</a>`,
+      'missing README section': '<a href="https://github.com/davidteren/mutineer#no-such-section">x</a>'
+    };
+    for (const [message, html] of Object.entries(cases)) {
+      fs.writeFileSync(path.join(directory, 'index.html'), html);
+      const result = spawnSync('python3', ['test/site_links.py', directory], { encoding: 'utf8' });
+      assert.equal(result.status, 1, `${message}: ${result.error?.message || result.stdout}`);
+      assert.match(result.stderr, new RegExp(message));
+    }
+    fs.writeFileSync(path.join(directory, 'index.html'), `<a href="${BASE}/page.html#here">ok</a>`);
+    const good = spawnSync('python3', ['test/site_links.py', directory], { encoding: 'utf8' });
+    assert.equal(good.status, 0, good.stderr);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test('HTML pages with markdown twins advertise rel=alternate', () => {
   const twins = {
