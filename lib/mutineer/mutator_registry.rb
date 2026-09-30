@@ -17,6 +17,7 @@ require_relative "mutators/negation_removal"
 require_relative "mutators/chain_link"
 require_relative "mutators/operand_removal"
 require_relative "mutators/array_literal"
+require_relative "mutators/condition_forcing"
 require_relative "mutators/operator_assignment"
 
 module Mutineer
@@ -47,6 +48,8 @@ module Mutineer
       "chain_link"         => Mutators::ChainLink,
       "operand_removal"    => Mutators::OperandRemoval,
       "array_literal"      => Mutators::ArrayLiteral,
+      "condition_true"     => Mutators::ConditionTrue,
+      "condition_false"    => Mutators::ConditionFalse,
       "operator_assignment" => Mutators::OperatorAssignment
     }.freeze
 
@@ -55,7 +58,8 @@ module Mutineer
     # Tier-2 operators that remain opt-in.
     TIER2_NAMES   = %w[return_nil literal_mutation condition_negation string_literal regex collection_method
                        safe_navigation range negation_removal
-                       chain_link operand_removal array_literal operator_assignment].freeze
+                       chain_link operand_removal array_literal
+                       condition_true condition_false operator_assignment].freeze
 
     # Short human-readable descriptions for each operator.
     DESCRIPTIONS = {
@@ -76,6 +80,8 @@ module Mutineer
       "chain_link"         => "drop one call from a chain: a.b.c -> a.c",
       "operand_removal"    => "a && b -> a, b",
       "array_literal"      => "[a, b] -> []",
+      "condition_true"     => "if/elsif/unless/ternary/modifier/case-in guard condition -> true",
+      "condition_false"    => "if/elsif/unless/ternary/modifier/case-in guard condition -> false",
       "operator_assignment" => "+= <-> -=, *= <-> /=, %= -> *=, **= -> *= (not ||=, &&=)"
     }.freeze
 
