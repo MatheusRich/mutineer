@@ -55,8 +55,8 @@ mutineer run --dry-run lib/foo.rb
 | `--baseline FILE` | Exit 1 on new survivors / score drop versus a prior JSON run |
 | `--format human\|json\|html` | Report format (default: human) |
 | `--output FILE` | Write the report to FILE instead of stdout |
-| `--jobs N` | Parallel worker count |
-| `--rails` | Boot `config/environment` once (Rails apps) |
+| `--jobs N` | Parallel worker count; forced to 1 by `--test-command`, `--fail-fast`, or `--rails` without `--daemon` |
+| `--rails` | Boot `config/environment` once; without `--daemon`, defaults to `redefine` and runs serially |
 | `--daemon` | Persistent daemon + per-worker DB isolation (needs `--rails` / `--boot`) |
 | `--dry-run` | List candidate mutations without executing |
 
@@ -80,7 +80,7 @@ Default (Tier 1): `arithmetic`, `comparison`, `boolean_connector`, `boolean_lite
 Tier 2 (off until `--operators`): `return_nil`, `literal_mutation`, `condition_negation`,
 `string_literal`, `regex`, `collection_method`, `safe_navigation`, `range`,
 `negation_removal`, `chain_link`, `operand_removal`,
-`array_literal`.
+`array_literal`, `condition_true`, `condition_false`, `operator_assignment`.
 
 `mutineer --list-operators` prints the live set.
 

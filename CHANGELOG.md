@@ -6,7 +6,79 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- **`rake site:build` can no longer delete a directory such as `lib/` or
+  `.git`** (#162). The task removed the destination it was given, and only
+  refused the checkout, its parents and `docs/`. It now always builds into
+  `_site/` at the checkout root, and `rake "site:build[DEST]"` and
+  `SITE_BUILD_DEST` are gone.
+- **Documentation matches the 1.4 behavior.** Config examples use supported keys,
+  agent loops check the exit code and a real score, and report totals explain
+  partial `--fail-fast` runs. The README lists every config key and its validation
+  rules. API README links work outside GitHub, repeated changelog headings have
+  unique anchors, and the website checks validate built links and anchors.
+  Mutant-id wording and the gem's Minitest/RSpec description are also corrected.
+
+## [1.4.0] - 2026-09-30
+
+### Added
+- **Condition-forcing operators** (Tier-2, opt-in via `--operators`):
+  `condition_true` and `condition_false` replace an `if`/`elsif`/`unless`,
+  ternary, modifier or `case`/`in` guard condition with `(true)` or `(false)`, so
+  its branch always runs or never runs. A surviving mutant means no selected
+  test detected the forced condition. A literal condition, also in
+  parentheses, makes no mutant: forcing it changes nothing or repeats the
+  `boolean_literal` flip. A condition that holds a heredoc makes no mutant.
+  A condition that assigns a variable keeps its code, and only its value
+  is forced (`(m = x; true)`), so later code still sees the variable.
+  The never-runs side of an else-less conditional can
+  be the same program as the `nil` that `statement_removal` or `return_nil`
+  puts in its place; it is still made, so these mutants and their ids do not
+  depend on which other operators run.
+- **Operator-assignment operator** (Tier-2, opt-in via `--operators`):
+  `operator_assignment` swaps the operator of a compound assignment:
+  `+=` <-> `-=`, `*=` <-> `/=`, and `%=` and `**=` -> `*=`. It covers local,
+  instance, class and global variables, constants, calls (`a.b += 1`) and
+  index calls (`a[i] += 1`). The `arithmetic` operator never sees these
+  forms, because Prism does not parse them as calls. The operator does not
+  change `||=`, `&&=`, or the bitwise and shift forms (`|=`, `<<=`).
+
+### Fixed
+- **A typed `--rails`, `--verbose` or `--debug` beats `rails: false` and
+  `verbose: false` in `.mutineer.yml`** (#103). The flag was dropped, so the
+  run went on without Rails boot or verbose output. The config layers now keep
+  only the keys the user wrote, and "did the user write this" comes from those
+  keys, not from a hand-kept list.
+- **`framework: rspec` in `.mutineer.yml` survives test pairing** (#103).
+  Pairing re-detected the framework from the test file names, so an RSpec
+  suite in `test/calc_test.rb` ran under Minitest.
+- **A bad number is an error, not a rounded value** (#105). `--jobs 1.9` and
+  `--baseline-epsilon abc` no longer become `1` and `0.0`. One option schema
+  parses each value once, where it enters, for both the command line and
+  `.mutineer.yml`.
+- **`--since` keeps a source file that git does not track yet** (#156). Before,
+  such a file counted as unchanged. The run scored no mutants, and a positive
+  `--threshold` still exited 0. The file is now new in full, so all its
+  mutants run.
+
 ### Changed
+- **These now exit 2 with a message that names the option**: `jobs: 1.9` or
+  `jobs: true` in `.mutineer.yml` (before: `1`, or a crash); a bad, negative
+  or non-finite `--baseline-epsilon` (before: `0.0`); a boolean key in
+  `.mutineer.yml` that is not `true` or `false`, such as the string `"yes"`
+  (before: `false`).
+- **`--jobs` takes plain digits only.** `0x2`, `+2`, `" 2"` and `1_0` exit 2.
+  Before, `Integer()` read them as 2, 2, 2 and 10. `--threshold` and
+  `--baseline-epsilon` take a plain decimal, such as `2` or `2.5`, from a
+  string. `0x10`, `+2`, `1_0` and `1e2` exit 2. Before, `Float()` read them
+  as 16.0, 2.0, 10.0 and 100.0.
+- **A string option that gets `true`, `false` or no value exits 2**, such as
+  `only: false` or `baseline:` in `.mutineer.yml`. A blank `since` also exits 2,
+  in the file and on the command line, so an unset shell variable does not
+  turn scoping off. `since: false` still means no scoping.
+- **Config file errors start with the file and key**, for example
+  `.mutineer.yml: threshold must be a number between 0 and 100`, where they
+  started with `--threshold`.
 - **The docs site is built in CI** — a Pages workflow runs `rake site:build`
   and deploys the result, so the YARD HTML under `/api/`, `llms-full.txt`,
   `json-schema.html` and `sitemap.xml` are no longer committed. CI checks
@@ -633,6 +705,7 @@ Rails hardening + CI batch (issues #8–#13), all verified Rails-free.
 - `.mutineer.yml` configuration (CLI > config > default precedence).
 - Byte-correct source handling for multibyte (UTF-8) sources.
 
+[1.4.0]: https://github.com/davidteren/mutineer/releases/tag/v1.4.0
 [1.3.0]: https://github.com/davidteren/mutineer/releases/tag/v1.3.0
 [1.2.0]: https://github.com/davidteren/mutineer/releases/tag/v1.2.0
 [1.1.0]: https://github.com/davidteren/mutineer/releases/tag/v1.1.0
