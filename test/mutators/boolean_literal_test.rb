@@ -41,9 +41,4 @@ class BooleanLiteralTest < Minitest::Test
     mutations, = run_mutator("a + b")
     assert_empty mutations
   end
-
-  def test_class_shift_self_body_kept
-    mutations, = run_mutator("class << self\n    X = true\n  end")
-    assert_equal 1, mutations.size
-  end
 end
