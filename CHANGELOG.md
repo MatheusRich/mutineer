@@ -8,6 +8,13 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- **`mutineer init`.** It writes a commented `.mutineer.yml` with the default
+  operators. `since` stays commented, so the first run is a full scan.
+  `init --rails` also sets `rails: true` and prints the first run command.
+  An existing file is kept unless you pass `--force`.
+- **Rails rollout guide.** The page walks from one model, to a report-only CI
+  job, to a `--since` and `--baseline` pull request gate, to `--threshold`
+  on chosen folders. It has a GitHub Actions recipe and a GitLab CI recipe.
 - **A production-ready section and a stability contract.** The README opens
   with a support matrix for Ruby, database, framework, and parallelism.
   `STABILITY.md` lists what a release keeps and what 2.0 will change.
