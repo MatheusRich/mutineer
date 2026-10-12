@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- **A production-ready section and a stability contract.** The README opens
+  with a support matrix for Ruby, database, framework, and parallelism.
+  `STABILITY.md` lists what a release keeps and what 2.0 will change.
+  `SECURITY.md`, `CONTRIBUTING.md`, and GitHub issue forms are new.
+  The docs home page takes the same section from the README at site build.
 - **`--allow-empty` and `allow_empty:`.** A run with no mutants now warns
   that Mutineer 2.0 will fail it, unless `--allow-empty` marks it as expected.
   A `--since` run whose changes hold no mutants does not warn: it says the
