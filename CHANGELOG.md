@@ -27,6 +27,12 @@ All notable changes to this project are documented here. The format is based on
   `SECURITY.md`, `CONTRIBUTING.md`, and GitHub issue forms are new.
   The docs home page takes the same section from the README at site build.
 
+### Fixed
+
+- **A Rails daemon boots again while a mutant file is still open.**
+  The file stays when another process holds it. The next boot skips
+  that file name instead of stopping.
+
 ## [1.6.0] - 2026-10-08
 
 ### Added

@@ -49,6 +49,23 @@ module Mutineer
   module DaemonServer
     # Poll interval (seconds) for the per-fork deadline wait loop.
     POLL = 0.02
+    # Basename glob for a mutant file written beside a source file.
+    # Tempfile puts hyphens in the name, so it is not a constant name.
+    DAEMON_TEMP_BASENAME = "mutineer_daemon*.rb"
+
+    # Skips daemon mutant files when Zeitwerk scans an autoload directory.
+    # The boot sweep keeps a file another process still holds. That file would
+    # stop the next boot, because its name is not a constant.
+    module DaemonTempIgnore
+      # @return [void]
+      def setup
+        dirs = Array(Mutineer::DaemonServer.instance_variable_get(:@source_dirs))
+        dirs.each do |dir|
+          ignore(File.join(dir, Mutineer::DaemonServer::DAEMON_TEMP_BASENAME))
+        end
+        super
+      end
+    end
 
     class << self
       # Serve the protocol on the given IO pair (defaults to stdio). Returns on quit.
@@ -143,9 +160,12 @@ module Mutineer
         # dir BEFORE the app boots. Zeitwerk would otherwise choke on the
         # tempfile's non-constant name during autoload setup. A file another
         # live process still owns stays: this runs before the database lock,
-        # so a refused boot must not delete that run's mutant.
+        # so a refused boot must not delete that run's mutant. The kept file
+        # is hidden from Zeitwerk instead.
         sweep_temps
+        install_zeitwerk_ignore! if cfg["rails"]
         require File.expand_path(cfg["boot"]) if cfg["boot"]
+        @zeitwerk_trace&.disable
         # The --require files, after the boot as in-process (Runner.execute), so
         # the coverage peek sees what they ran at load.
         Array(cfg["require_paths"]).each { |f| require File.expand_path(f) }
@@ -299,12 +319,38 @@ module Mutineer
         { "id" => req["id"], "verdict" => verdict }
       end
 
+      # Hide kept mutant files from Zeitwerk before the app builds its loaders.
+      # The loader class may not exist yet. Watch for it, then stop watching.
+      #
+      # @return [void]
+      def install_zeitwerk_ignore!
+        if defined?(Zeitwerk::Loader)
+          prepend_daemon_temp_ignore
+          return
+        end
+
+        @zeitwerk_trace = TracePoint.new(:end) do |event|
+          next unless event.self.is_a?(Class) && event.self.name == "Zeitwerk::Loader"
+
+          @zeitwerk_trace.disable
+          prepend_daemon_temp_ignore
+        end
+        @zeitwerk_trace.enable
+      end
+
+      # @return [void]
+      def prepend_daemon_temp_ignore
+        return if Zeitwerk::Loader.ancestors.include?(DaemonTempIgnore)
+
+        Zeitwerk::Loader.prepend(DaemonTempIgnore)
+      end
+
       # Remove orphaned mutant tempfiles from the source dirs (parent-side; the
       # SIGKILL path cannot run the child's ensure). Mirrors JobPlan.sweep_orphans.
       # Skips a file another process still owns ({OrphanGuard.mutant_file_in_use?}).
       def sweep_temps
         @source_dirs.to_a.each do |dir|
-          Dir.glob(File.join(dir, "mutineer_daemon*.rb")).each do |path|
+          Dir.glob(File.join(dir, DAEMON_TEMP_BASENAME)).each do |path|
             next if OrphanGuard.mutant_file_in_use?(path)
 
             File.unlink(path) rescue nil # rubocop:disable Style/RescueModifier
