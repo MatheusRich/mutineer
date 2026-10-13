@@ -42,6 +42,7 @@ require_relative "mutineer/kill_matrix"
 require_relative "mutineer/reporter"
 require_relative "mutineer/baseline"
 require_relative "mutineer/triage"
+require_relative "mutineer/migrate"
 require_relative "mutineer/init"
 require_relative "mutineer/cli"
 

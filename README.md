@@ -46,13 +46,13 @@ It runs in parallel on those systems.
 | --- | --- | --- | --- | --- |
 | 3.4 or later | SQLite file | Minitest | supported with `--daemon` | supported |
 | 3.4 or later | SQLite file | RSpec | not supported | serial only |
-| 3.4 or later | PostgreSQL | Minitest | not supported | serial only |
+| 3.4 or later | PostgreSQL | Minitest | supported with `--daemon` | supported |
 | 3.4 or later | PostgreSQL | RSpec | not supported | serial only |
 | 3.4 or later | MySQL | Minitest | not supported | serial only |
 | 3.4 or later | MySQL | RSpec | not supported | serial only |
 | 3.4 or later | SQLite in memory | Minitest | not supported | serial only |
 | 3.4 or later | SQLite in memory | RSpec | not supported | serial only |
-| 3.4 or later | more than one database | Minitest | not supported | serial only |
+| 3.4 or later | more than one database | Minitest | one worker | serial only |
 | 3.4 or later | more than one database | RSpec | not supported | serial only |
 
 This matrix is for a Rails app on Ruby 3.4 or later.
@@ -62,12 +62,17 @@ This matrix is for a Rails app on Ruby 3.4 or later.
 SQLite file means a database file, not `:memory:`.
 Minitest on that file can use `--daemon`.
 RSpec on that file is serial only.
-PostgreSQL is serial only.
+PostgreSQL with Minitest can use `--daemon`.
+PostgreSQL with RSpec is serial only.
 MySQL is serial only.
 A `:memory:` database is serial only.
-An app with more than one database is serial only.
+An app with more than one database runs one worker.
 `--daemon` isolates only the primary connection.
 `--rails` without `--daemon` is serial on every row.
+A Postgres worker database is copied once, at the start of the run.
+A test that commits rows outside a transaction leaves them in that worker database.
+The next mutant on that worker sees those rows.
+Rails parallel tests have the same ceiling.
 
 <!-- /contract:support-matrix -->
 
@@ -96,6 +101,7 @@ gem "mutineer", group: :test
 
 ```sh
 mutineer run <source...> --test <test> [--test <test>...] [options]
+mutineer migrate <source...> [--dry-run] [--operators LIST]
 ```
 
 Mutate `lib/calculator.rb`, checking it against its test, and fail CI if the
@@ -104,6 +110,23 @@ mutation score drops below 90%:
 ```sh
 mutineer run lib/calculator.rb --test test/calculator_test.rb --threshold 90
 ```
+
+### Migrate old ignore ids
+
+```sh
+mutineer migrate <source...> [--dry-run] [--operators LIST]
+```
+
+`migrate` rewrites old-format ids in `.mutineer.yml` `ignore:` to the current
+ids. It keeps comments and every other line. When one old id matches several
+mutants, it writes every new id. That keeps the 1.x match. An id that matches
+nothing stays, and the command exits 1. A block scalar under `ignore:`
+is not supported: the command exits 2 and does not change the file.
+`--dry-run` prints each change and writes nothing.
+
+Pass the same sources and `--operators` you use for `run`. The command runs
+no tests. It does not rewrite a baseline. Generate a new baseline with
+`--format json`.
 
 ### Options
 
@@ -233,10 +256,13 @@ RAILS_ENV=test bundle exec mutineer run \
 - **One backend at a time** — `--daemon` can't be combined with `--test-command`
   (choose one), and it needs an app to boot (`--rails` or `--boot`).
 
-Status: **SQLite** only (hermetic, CI-proven). Per-worker provisioning for
-**Postgres** and other adapters is not supported: on those, `--daemon` scores
-every mutant as `error`. Use `--daemon` with a SQLite test database, or drop
-`--daemon` to run serially on other adapters.
+Status: **SQLite** and **PostgreSQL** (Minitest). Each Postgres worker uses a
+database named `<base>-mutineer-<N>` (shortened when that would pass 63 bytes).
+Mutineer copies the test database into those names before the workers start,
+and leaves them in place when the run ends. Drop one with
+`DROP DATABASE "myapp_test-mutineer-0";` (use your test database name and slot).
+MySQL is not supported on `--daemon` yet: the run stops before it scores a mutant.
+A `:memory:` database is not supported on `--daemon`.
 
 ### Apps on Ruby < 3.4
 
@@ -370,12 +396,15 @@ working until 2.0, with a warning:
   hid mutants you did not mean to ignore. The warning says so. Keep only the ids for the mutant you meant to
   ignore, not all of them. The list covers only the sources and operators in
   that run, so run over every source with every operator set you use (for
-  example your Tier-2 `--operators`) for the full list.
+  example your Tier-2 `--operators`) for the full list. Or run
+  `mutineer migrate` on those sources. It writes every new id. Delete any id
+  you did not mean to ignore. See [Migrate old ignore ids](https://github.com/davidteren/mutineer#migrate-old-ignore-ids).
 - **`--baseline`** An old baseline still matches: a survivor matches a stored
   one with the same old id in the same file. A stored file that is an absolute
   path outside the project root (a baseline written on another machine)
   matches on the old id alone. The run tells you to
-  regenerate it. Regenerate it with `--format json`, but only after every gate
+  generate a new baseline with `--format json`. `migrate` does not rewrite a
+  baseline. Generate the new file only after every gate
   that reads it runs 1.3 or later (the Action's `version:` pin, your CI
   `Gemfile.lock`). An older version treats every new-format survivor as new.
 
