@@ -8,6 +8,16 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- **`mutineer migrate`.** It rewrites old-format ids in `.mutineer.yml`
+  `ignore:` to the current ids. It keeps comments and every other line.
+  One old id that matches several mutants becomes every new id. An id that
+  matches nothing stays, and the command exits 1. A block scalar under
+  `ignore:` is not supported: the command exits 2 and does not change the
+  file. `--dry-run` prints each change and writes nothing. It does not
+  rewrite a baseline. Generate a new baseline with `--format json`. An
+  old-id warning names `mutineer migrate` and says that this becomes an
+  error in Mutineer 2.0. The baseline warning says to generate a new
+  baseline with `--format json`.
 - **`mutineer init`.** It writes a commented `.mutineer.yml` with the default
   operators. `since` stays commented, so the first run is a full scan.
   `init --rails` also sets `rails: true` and prints the first run command.
