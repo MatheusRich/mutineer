@@ -387,7 +387,7 @@ working until 2.0, with a warning:
   that run, so run over every source with every operator set you use (for
   example your Tier-2 `--operators`) for the full list. Or run
   `mutineer migrate` on those sources. It writes every new id. Delete any id
-  you did not mean to ignore. See [Migrate old ignore ids](#migrate-old-ignore-ids).
+  you did not mean to ignore. See [Migrate old ignore ids](https://github.com/davidteren/mutineer#migrate-old-ignore-ids).
 - **`--baseline`** An old baseline still matches: a survivor matches a stored
   one with the same old id in the same file. A stored file that is an absolute
   path outside the project root (a baseline written on another machine)
