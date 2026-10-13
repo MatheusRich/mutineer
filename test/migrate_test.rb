@@ -161,6 +161,15 @@ class MigrateTest < Minitest::Test
                  Mutineer::Migrate.rewrite(digits, Set.new, old_to_new).text
   end
 
+  # The read-back refuses a result that is not valid YAML.
+  def test_a_rewrite_that_is_not_valid_yaml_is_refused
+    Mutineer::Migrate.stub(:rewrite_block, ->(*) { ["  - [unclosed\n"] }) do
+      assert_raises(ArgumentError) do
+        Mutineer::Migrate.rewrite("ignore:\n  - aaaaaaaaaaaa\n", Set.new, { "aaaaaaaaaaaa" => ["bbbbbbbbbbbb"] })
+      end
+    end
+  end
+
   # A reason that repeats the id after a comma is still text: only the key
   # position changes. A mapping with the id key twice is refused, not guessed.
   def test_flow_mapping_id_key_is_found_exactly_or_refused

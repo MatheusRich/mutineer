@@ -106,8 +106,11 @@ module Mutineer
     # @return [void]
     # @raise [ArgumentError] when an old id was missed or a reason changed.
     def self.verify_rewrite!(before, after, current, old_to_new, split)
-      old_ids, old_reasons = ignore_entries(before)
-      new_ids, new_reasons = ignore_entries(after)
+      old_ids, old_reasons = ignore_entries(before) || [[], []]
+      parsed = ignore_entries(after)
+      raise ArgumentError, "migrate would write a .mutineer.yml that is not valid YAML. Edit the ignore ids by hand." unless parsed
+
+      new_ids, new_reasons = parsed
       left = split.map(&:old_id)
       missed = (new_ids & old_ids).find { |id| old_to_new.key?(id) && !current.include?(id) && !left.include?(id) }
       if missed
@@ -123,7 +126,7 @@ module Mutineer
     # in file order. Ids are read as {Config.ignore_id_text} reads them.
     #
     # @param text [String] the file text.
-    # @return [Array(Array<String>, Array<String>)] ids and reasons.
+    # @return [Array(Array<String>, Array<String>), nil] ids and reasons, or nil when the text is not valid YAML.
     def self.ignore_entries(text)
       doc = YAML.safe_load(text)
       value = doc.is_a?(Hash) ? doc["ignore"] : nil
@@ -140,8 +143,9 @@ module Mutineer
       end
       [ids.compact, reasons]
     rescue Psych::Exception
-      [[], []]
+      nil
     end
+    private_class_method :verify_rewrite!, :ignore_entries
 
     class << self
       private
