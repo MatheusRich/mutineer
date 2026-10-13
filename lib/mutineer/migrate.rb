@@ -86,7 +86,61 @@ module Mutineer
           lines << line
         end
       end
-      Outcome.new(replacements: replacements, unmapped: unmapped, split: split, text: lines.join)
+      out = lines.join
+      verify_rewrite!(text, out, current, old_to_new, split)
+      Outcome.new(replacements: replacements, unmapped: unmapped, split: split, text: out)
+    end
+
+    # Reads both texts as YAML and checks the text edit did what it claims.
+    # An id that still maps to a new id, and was not left for a hand split,
+    # means an entry shape the line edit missed (a mapping over several
+    # lines, a quoted key). A changed reason means the edit touched reason
+    # text. Either is refused, so nothing is written and nothing passes
+    # silently.
+    #
+    # @param before [String] the original file text.
+    # @param after [String] the rewritten text.
+    # @param current [Set<String>] new-format ids in this run.
+    # @param old_to_new [Hash{String => Array<String>}] old id => new ids.
+    # @param split [Array<Replacement>] mapping ids left for a hand split.
+    # @return [void]
+    # @raise [ArgumentError] when an old id was missed or a reason changed.
+    def self.verify_rewrite!(before, after, current, old_to_new, split)
+      old_ids, old_reasons = ignore_entries(before)
+      new_ids, new_reasons = ignore_entries(after)
+      left = split.map(&:old_id)
+      missed = (new_ids & old_ids).find { |id| old_to_new.key?(id) && !current.include?(id) && !left.include?(id) }
+      if missed
+        raise ArgumentError, "ignore entry #{missed} is in a shape migrate cannot edit. " \
+                             "Write it as \"- id: #{missed}\" on its own line, or as a bare id."
+      end
+      return if old_reasons == new_reasons
+
+      raise ArgumentError, "migrate would change the text of an ignore: reason. Edit those ids by hand."
+    end
+
+    # The ids and reasons in a `.mutineer.yml` `ignore:` value, read as YAML,
+    # in file order. Ids are read as {Config.ignore_id_text} reads them.
+    #
+    # @param text [String] the file text.
+    # @return [Array(Array<String>, Array<String>)] ids and reasons.
+    def self.ignore_entries(text)
+      doc = YAML.safe_load(text)
+      value = doc.is_a?(Hash) ? doc["ignore"] : nil
+      items = value.is_a?(Array) ? value : [value].compact
+      ids = []
+      reasons = []
+      items.each do |item|
+        if item.is_a?(Hash)
+          ids << Config.ignore_id_text(item["id"])
+          reasons << item["reason"].to_s
+        else
+          ids << Config.ignore_id_text(item)
+        end
+      end
+      [ids.compact, reasons]
+    rescue Psych::Exception
+      [[], []]
     end
 
     class << self
@@ -590,8 +644,8 @@ module Mutineer
         rescue Psych::SyntaxError
           raise ArgumentError, MAPPING_UNSUPPORTED_MESSAGE
         end
-        id = parsed.is_a?(Hash) ? parsed["id"] : nil
-        return raw unless id.is_a?(String) && id.match?(/\A[0-9a-f]{12}\z/)
+        id = parsed.is_a?(Hash) ? Config.ignore_id_text(parsed["id"]) : nil
+        return raw unless id&.match?(/\A[0-9a-f]{12}\z/)
 
         key = /([{,][ \t\r\n]*id[ \t]*:[ \t]*)(['"]?)#{id}\2(?=[ \t\r\n]*[,}])/
         raise ArgumentError, MAPPING_UNSUPPORTED_MESSAGE unless raw.scan(key).size == 1

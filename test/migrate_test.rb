@@ -144,6 +144,23 @@ class MigrateTest < Minitest::Test
     end
   end
 
+  # cubic on #241: shapes the line edit cannot handle are refused (exit 2),
+  # never left silently. An all-digit id is read as Config reads it.
+  def test_unsupported_mapping_shapes_are_refused_not_skipped
+    old_to_new = { "aaaaaaaaaaaa" => ["bbbbbbbbbbbb"], "123456789012" => ["cccccccccccc"] }
+    [
+      "ignore:\n  - { id: aaaaaaaaaaaa,\n      reason: x }\n",
+      "ignore:\n  - \"id\": aaaaaaaaaaaa\n    reason: x\n",
+      "ignore:\n  - id: bbbbbbbbbbbb\n    reason: |\n      id: aaaaaaaaaaaa\n"
+    ].each do |text|
+      assert_raises(ArgumentError, text) { Mutineer::Migrate.rewrite(text, Set.new, old_to_new) }
+    end
+
+    digits = "ignore:\n  - { id: 123456789012, reason: x }\n"
+    assert_equal "ignore:\n  - { id: cccccccccccc, reason: x }\n",
+                 Mutineer::Migrate.rewrite(digits, Set.new, old_to_new).text
+  end
+
   # A reason that repeats the id after a comma is still text: only the key
   # position changes. A mapping with the id key twice is refused, not guessed.
   def test_flow_mapping_id_key_is_found_exactly_or_refused
