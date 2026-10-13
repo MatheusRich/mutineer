@@ -72,10 +72,11 @@ All notable changes to this project are documented here. The format is based on
   that file name instead of stopping.
 - **SimpleCov in a test helper no longer breaks every mutant under
   `--rails` or `--boot` (#248).** After the coverage map is built, mutineer
-  pauses Ruby's coverage (#228). SimpleCov saw it as off and tried to start
-  it, which Ruby refuses while coverage is paused, so the test helper raised
-  in every mutant. Each mutant now stops the paused coverage before its tests
-  load, so the helper starts it again. This applies to `--daemon` too.
+  pauses Ruby's coverage (#228). SimpleCov saw the paused coverage as off and
+  tried to start it. Ruby refuses that while coverage is paused, so the test
+  helper raised in every mutant. Now a start in a mutant first stops the
+  paused coverage. A mutant whose tests start nothing keeps it paused and pays
+  nothing. This applies to `--daemon` too.
 
 ## [1.6.0] - 2026-10-08
 

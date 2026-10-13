@@ -297,7 +297,7 @@ module Mutineer
           code =
             begin
               ChildStdout.silence
-              ChildCoverage.release
+              ChildCoverage.allow_start
               close_protocol
               # Route THIS fork at its own worker database before any test loads.
               # A routing failure raises here and is scored `error`, never a false verdict.

@@ -57,7 +57,7 @@ module Mutineer
         code = 0
         begin
           ChildStdout.silence
-          ChildCoverage.release
+          ChildCoverage.allow_start
           # A block that takes no channel (a zero-arity lambda) still runs.
           result = channel ? yield(wr) : yield
           code = result.is_a?(Integer) ? result : 0

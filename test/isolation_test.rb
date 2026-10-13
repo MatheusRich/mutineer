@@ -57,16 +57,18 @@ class IsolationTest < Minitest::Test
 
   # #248: the parent suspends Coverage after the map (#228). A test helper that
   # starts Coverage when it is off, as SimpleCov does, must not raise in the
-  # mutant child. The outer fork keeps the suspend out of this test process.
+  # mutant child. A child that starts nothing keeps Coverage suspended, so it
+  # does not pay to stop it. The outer fork keeps the suspend out of this process.
   def test_a_helper_can_start_coverage_in_a_child_of_a_suspended_parent
     require "coverage"
     outer = Mutineer::Isolation.run do
       Coverage.start(lines: true) if Coverage.state == :idle
       Coverage.resume if Coverage.state == :suspended
       Coverage.suspend
-      inner = Mutineer::Isolation.run { Coverage.start(lines: true) unless Coverage.running? }
+      untouched = Mutineer::Isolation.run { Coverage.state == :suspended ? 0 : 1 }
+      started = Mutineer::Isolation.run { Coverage.start(lines: true) unless Coverage.running? }
       parent_still_suspended = Coverage.state == :suspended
-      inner.survived? && parent_still_suspended ? 0 : 1
+      untouched.survived? && started.survived? && parent_still_suspended ? 0 : 1
     end
     assert_predicate outer, :survived?
   end
