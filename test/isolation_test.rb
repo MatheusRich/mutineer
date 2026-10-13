@@ -66,9 +66,18 @@ class IsolationTest < Minitest::Test
       Coverage.resume if Coverage.state == :suspended
       Coverage.suspend
       untouched = Mutineer::Isolation.run { Coverage.state == :suspended ? 0 : 1 }
-      started = Mutineer::Isolation.run { Coverage.start(lines: true) unless Coverage.running? }
+      # SimpleCov passes its options as a positional hash.
+      started = Mutineer::Isolation.run do
+        Coverage.start({ lines: true }) unless Coverage.running?
+        Coverage.running? ? 0 : 1
+      end
+      set_up = Mutineer::Isolation.run do
+        Coverage.setup(lines: true)
+        Coverage.resume
+        Coverage.running? ? 0 : 1
+      end
       parent_still_suspended = Coverage.state == :suspended
-      untouched.survived? && started.survived? && parent_still_suspended ? 0 : 1
+      [untouched, started, set_up].all?(&:survived?) && parent_still_suspended ? 0 : 1
     end
     assert_predicate outer, :survived?
   end
