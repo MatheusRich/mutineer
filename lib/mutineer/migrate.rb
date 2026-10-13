@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "set"
+require "yaml"
 require_relative "job_plan"
 require_relative "mutator_registry"
 
@@ -15,8 +16,12 @@ module Mutineer
   # The file is edited as text. A YAML load and dump would drop comments and
   # reorder keys. Only a bare id inside `ignore:` is replaced. A flow list may
   # span lines. A scalar changes only when its whole value is an id. A block
-  # scalar under `ignore:` raises ArgumentError. A `{ id:, reason: }` entry is
-  # left as written. A baseline file is never read.
+  # scalar under `ignore:` raises ArgumentError. In a `{ id:, reason: }`
+  # mapping the id is replaced in place: `- id: x` lines, `- { id: x }` items,
+  # and `{ id: x }` entries inside `ignore: [...]`. Comments and reason text
+  # are never touched. An old id that now matches several mutants cannot fit
+  # one mapping, so it is left in place and reported for a hand edit. A
+  # baseline file is never read.
   module Migrate
     # One old id and the new ids that replace it, in collection order.
     Replacement = Data.define(:old_id, :new_ids)
@@ -24,7 +29,10 @@ module Mutineer
     # The outcome of rewriting one file in memory. `text` is what to write.
     # It equals the input when nothing changed. `unmapped` holds bare ids that
     # matched no mutant, in file order, each once.
-    Outcome = Data.define(:replacements, :unmapped, :text)
+    #
+    # `split` holds old ids in a mapping entry that now match several new ids,
+    # as {Replacement}s: one mapping holds one id, so the user splits it by hand.
+    Outcome = Data.define(:replacements, :unmapped, :split, :text)
 
     # Builds the id maps for `config`'s sources and operators.
     #
@@ -60,31 +68,101 @@ module Mutineer
     def self.rewrite(text, current, old_to_new)
       replacements = []
       unmapped = []
+      split = []
       lines = []
       pending = text.lines
       while (line = pending.shift)
         case line_kind(line)
         when :flow
-          lines << rewrite_flow(collect_flow(line, pending), current, old_to_new, replacements, unmapped)
+          lines << rewrite_flow(collect_flow(line, pending), current, old_to_new, replacements, unmapped, split)
         when :scalar
           lines.concat(rewrite_scalar(line, current, old_to_new, replacements, unmapped))
         when :block_scalar
           reject_block_scalar
         when :block
           lines << line
-          lines.concat(rewrite_block(pending, current, old_to_new, replacements, unmapped))
+          lines.concat(rewrite_block(pending, current, old_to_new, replacements, unmapped, split))
         else
           lines << line
         end
       end
-      Outcome.new(replacements: replacements, unmapped: unmapped, text: lines.join)
+      out = lines.join
+      verify_rewrite!(text, out, current, old_to_new, split)
+      Outcome.new(replacements: replacements, unmapped: unmapped, split: split, text: out)
     end
+
+    # Reads both texts as YAML and checks the text edit did what it claims.
+    # An id that still maps to a new id, and was not left for a hand split,
+    # means an entry shape the line edit missed (a mapping over several
+    # lines, a quoted key). A changed reason means the edit touched reason
+    # text. Either is refused, so nothing is written and nothing passes
+    # silently.
+    #
+    # @param before [String] the original file text.
+    # @param after [String] the rewritten text.
+    # @param current [Set<String>] new-format ids in this run.
+    # @param old_to_new [Hash{String => Array<String>}] old id => new ids.
+    # @param split [Array<Replacement>] mapping ids left for a hand split.
+    # @return [void]
+    # @raise [ArgumentError] when an old id was missed or a reason changed.
+    def self.verify_rewrite!(before, after, current, old_to_new, split)
+      old_ids, old_reasons = ignore_entries(before) || [[], []]
+      parsed = ignore_entries(after)
+      raise ArgumentError, "migrate would write a .mutineer.yml that is not valid YAML. Edit the ignore ids by hand." unless parsed
+
+      new_ids, new_reasons = parsed
+      left = split.map(&:old_id)
+      missed = (new_ids & old_ids).find { |id| old_to_new.key?(id) && !current.include?(id) && !left.include?(id) }
+      if missed
+        raise ArgumentError, "ignore entry #{missed} is in a shape migrate cannot edit. " \
+                             "Write it as \"- id: #{missed}\" on its own line, or as a bare id."
+      end
+      return if old_reasons == new_reasons
+
+      raise ArgumentError, "migrate would change the text of an ignore: reason. Edit those ids by hand."
+    end
+
+    # The ids and reasons in a `.mutineer.yml` `ignore:` value, read as YAML,
+    # in file order. Ids are read as {Config.ignore_id_text} reads them.
+    #
+    # @param text [String] the file text.
+    # @return [Array(Array<String>, Array<String>), nil] ids and reasons, or nil when the text is not valid YAML.
+    def self.ignore_entries(text)
+      doc = YAML.safe_load(text)
+      value = doc.is_a?(Hash) ? doc["ignore"] : nil
+      items = value.is_a?(Array) ? value : [value].compact
+      ids = []
+      reasons = []
+      items.each do |item|
+        if item.is_a?(Hash)
+          ids << Config.ignore_id_text(item["id"])
+          reasons << item["reason"].to_s
+        else
+          ids << Config.ignore_id_text(item)
+        end
+      end
+      [ids.compact, reasons]
+    rescue Psych::Exception
+      nil
+    end
+    private_class_method :verify_rewrite!, :ignore_entries
 
     class << self
       private
 
       # A block-list item whose value is one bare id.
       ITEM = /\A([ \t]*-[ \t]+)(['"]?)([0-9a-f]{12})\2([ \t]*(?:\#.*)?)(\r?\n)?\z/
+
+      # A block-mapping line whose whole value is the `id:` key: `- id: x` or
+      # an indented `id: x`. Comments and reason text never match.
+      MAPPING_ID_LINE = /\A([ \t]*(?:-[ \t]+)?)(id[ \t]*:[ \t]*)(['"]?)([0-9a-f]{12})\3([ \t]*(?:\#.*)?)(\r?\n)?\z/
+
+      # A block-list item whose value is a flow mapping, `- { id: x, ... }`.
+      FLOW_MAPPING_ITEM = /\A([ \t]*-[ \t]+)(\{.*\})([ \t]*(?:\#.*)?)(\r?\n)?\z/
+
+      # Told to the user when a flow mapping's `id` cannot be located safely.
+      MAPPING_UNSUPPORTED_MESSAGE = "this ignore: { id:, reason: } entry is not supported. " \
+                                    "Write id: on its own line under the list item."
 
       # `ignore:` followed by one bare id on the same line.
       SCALAR = /\A(ignore:[ \t]*)(['"]?)([0-9a-f]{12})\2([ \t]*(?:\#.*)?)(\r?\n)?\z/
@@ -249,14 +327,15 @@ module Mutineer
       # @param old_to_new [Hash{String => Array<String>}] old id => new ids.
       # @param replacements [Array<Replacement>] recorded changes.
       # @param unmapped [Array<String>] bare ids that matched nothing.
+      # @param split [Array<Replacement>] mapping ids that now match several mutants.
       # @return [String] the text to write.
       # @raise [ArgumentError] when the list is not a flat list of scalars.
-      def rewrite_flow(chunk, current, old_to_new, replacements, unmapped)
+      def rewrite_flow(chunk, current, old_to_new, replacements, unmapped, split)
         open = chunk.index("[")
         close = matching_index(chunk, open, "[", "]")
         raise ArgumentError, UNCLOSED_FLOW_MESSAGE unless close
 
-        inner = rewrite_flow_items(chunk[(open + 1)...close], current, old_to_new, replacements, unmapped)
+        inner = rewrite_flow_items(chunk[(open + 1)...close], current, old_to_new, replacements, unmapped, split)
         "#{chunk[0..open]}#{inner}#{chunk[close..]}"
       end
 
@@ -267,9 +346,10 @@ module Mutineer
       # @param old_to_new [Hash{String => Array<String>}] old id => new ids.
       # @param replacements [Array<Replacement>] recorded changes.
       # @param unmapped [Array<String>] bare ids that matched nothing.
+      # @param split [Array<Replacement>] mapping ids that now match several mutants.
       # @return [String]
       # @raise [ArgumentError] when an entry is not a scalar or a `{ ... }` entry.
-      def rewrite_flow_items(inner, current, old_to_new, replacements, unmapped)
+      def rewrite_flow_items(inner, current, old_to_new, replacements, unmapped, split)
         out = +""
         index = 0
         while index < inner.length
@@ -285,7 +365,11 @@ module Mutineer
             raw, next_index = read_flow_item(inner, index)
             raise ArgumentError, FLOW_UNSUPPORTED_MESSAGE if next_index <= index
 
-            out << replace_flow_scalar(raw, current, old_to_new, replacements, unmapped)
+            out << if raw.start_with?("{")
+                     rewrite_flow_mapping(raw, current, old_to_new, replacements, unmapped, split)
+                   else
+                     replace_flow_scalar(raw, current, old_to_new, replacements, unmapped)
+                   end
             index = next_index
           end
         end
@@ -293,7 +377,7 @@ module Mutineer
       end
 
       # One flow entry starting at `index`: a quoted scalar, a plain scalar,
-      # or a `{ ... }` entry copied whole.
+      # or a whole `{ ... }` entry (its id is rewritten by {rewrite_flow_mapping}).
       #
       # @param text [String]
       # @param index [Integer]
@@ -439,23 +523,24 @@ module Mutineer
       end
 
       # The lines of a block-style `ignore:` value. A block scalar here is
-      # rejected. A `{ id:, reason: }` entry is left to {rewrite_item}.
+      # rejected. A `{ id:, reason: }` entry is rewritten by {rewrite_item}.
       #
       # @param pending [Array<String>] the lines still to read.
       # @param current [Set<String>] new-format ids in this run.
       # @param old_to_new [Hash{String => Array<String>}] old id => new ids.
       # @param replacements [Array<Replacement>] recorded changes.
       # @param unmapped [Array<String>] bare ids that matched nothing.
+      # @param split [Array<Replacement>] mapping ids that now match several mutants.
       # @return [Array<String>]
       # @raise [ArgumentError] when the value or a list item is a block scalar.
-      def rewrite_block(pending, current, old_to_new, replacements, unmapped)
+      def rewrite_block(pending, current, old_to_new, replacements, unmapped, split)
         written = []
         saw_entry = false
         while (next_line = pending.first) && inside_block?(next_line)
           raise ArgumentError, BLOCK_SCALAR_MESSAGE if block_scalar_entry?(next_line, saw_entry)
 
           saw_entry = true if next_line.match?(/\A[ \t]*[^ \t#\r\n]/)
-          written.concat(rewrite_item(pending.shift, current, old_to_new, replacements, unmapped))
+          written.concat(rewrite_item(pending.shift, current, old_to_new, replacements, unmapped, split))
         end
         written
       end
@@ -511,13 +596,86 @@ module Mutineer
       # @param old_to_new [Hash{String => Array<String>}] old id => new ids.
       # @param replacements [Array<Replacement>] recorded changes.
       # @param unmapped [Array<String>] bare ids that matched nothing.
+      # @param split [Array<Replacement>] mapping ids that now match several mutants.
       # @return [Array<String>] the lines to write.
-      def rewrite_item(line, current, old_to_new, replacements, unmapped)
+      def rewrite_item(line, current, old_to_new, replacements, unmapped, split)
         match = ITEM.match(line)
-        return [line] unless match
+        return [rewrite_mapping_id(line, current, old_to_new, replacements, unmapped, split)] unless match
 
         ids = mapped_ids(match[3], current, old_to_new, replacements, unmapped)
         render_lines(match[1], match[2], ids, match[4], match[5].to_s)
+      end
+
+      # Replaces the id in a block-mapping `id:` line or a `- { ... }` item,
+      # keeping the reason, quotes and comment. Other lines are returned as is.
+      #
+      # @param line [String] one line inside the `ignore:` block.
+      # @param current [Set<String>] new-format ids in this run.
+      # @param old_to_new [Hash{String => Array<String>}] old id => new ids.
+      # @param replacements [Array<Replacement>] recorded changes, in file order.
+      # @param unmapped [Array<String>] bare ids that matched nothing.
+      # @param split [Array<Replacement>] mapping ids that now match several mutants.
+      # @return [String] the line to write.
+      # @raise [ArgumentError] when a flow mapping's id cannot be located safely.
+      def rewrite_mapping_id(line, current, old_to_new, replacements, unmapped, split)
+        if (match = MAPPING_ID_LINE.match(line))
+          new_id = mapping_id(match[4], current, old_to_new, replacements, unmapped, split)
+          return "#{match[1]}#{match[2]}#{match[3]}#{new_id}#{match[3]}#{match[5]}#{match[6]}"
+        end
+        if (match = FLOW_MAPPING_ITEM.match(line))
+          mapping = rewrite_flow_mapping(match[2], current, old_to_new, replacements, unmapped, split)
+          return "#{match[1]}#{mapping}#{match[3]}#{match[4]}"
+        end
+        line
+      end
+
+      # Replaces the `id` value in one flow mapping, `{ id: x, reason: y }`.
+      # YAML reads the entry first, and the id is replaced only at a key
+      # position (after `{` or `,`), so an id quoted inside a reason stays.
+      # A mapping with no 12-hex `id` is returned unchanged.
+      #
+      # @param raw [String] the `{ ... }` text.
+      # @param current [Set<String>] new-format ids in this run.
+      # @param old_to_new [Hash{String => Array<String>}] old id => new ids.
+      # @param replacements [Array<Replacement>] recorded changes, in file order.
+      # @param unmapped [Array<String>] bare ids that matched nothing.
+      # @param split [Array<Replacement>] mapping ids that now match several mutants.
+      # @return [String]
+      # @raise [ArgumentError] when the entry does not parse or its id is not at exactly one key position.
+      def rewrite_flow_mapping(raw, current, old_to_new, replacements, unmapped, split)
+        parsed = begin
+          YAML.safe_load(raw)
+        rescue Psych::SyntaxError
+          raise ArgumentError, MAPPING_UNSUPPORTED_MESSAGE
+        end
+        id = parsed.is_a?(Hash) ? Config.ignore_id_text(parsed["id"]) : nil
+        return raw unless id&.match?(/\A[0-9a-f]{12}\z/)
+
+        key = /([{,][ \t\r\n]*id[ \t]*:[ \t]*)(['"]?)#{id}\2(?=[ \t\r\n]*[,}])/
+        raise ArgumentError, MAPPING_UNSUPPORTED_MESSAGE unless raw.scan(key).size == 1
+
+        new_id = mapping_id(id, current, old_to_new, replacements, unmapped, split)
+        raw.sub(key) { "#{Regexp.last_match(1)}#{Regexp.last_match(2)}#{new_id}#{Regexp.last_match(2)}" }
+      end
+
+      # The one id a mapping entry can hold. An old id that now matches several
+      # mutants stays and is recorded in `split` for a hand edit.
+      #
+      # @param id [String] the id in the file.
+      # @param current [Set<String>] new-format ids in this run.
+      # @param old_to_new [Hash{String => Array<String>}] old id => new ids.
+      # @param replacements [Array<Replacement>] recorded changes, in file order.
+      # @param unmapped [Array<String>] bare ids that matched nothing.
+      # @param split [Array<Replacement>] mapping ids that now match several mutants.
+      # @return [String]
+      def mapping_id(id, current, old_to_new, replacements, unmapped, split)
+        news = old_to_new[id]
+        if news && news.size > 1 && !current.include?(id)
+          split << Replacement.new(old_id: id, new_ids: news.dup)
+          return id
+        end
+
+        mapped_ids(id, current, old_to_new, replacements, unmapped).first
       end
 
       # One list item per id. The original comment stays on the first item.

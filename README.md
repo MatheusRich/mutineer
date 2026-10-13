@@ -120,7 +120,10 @@ mutineer migrate <source...> [--dry-run] [--operators LIST]
 `migrate` rewrites old-format ids in `.mutineer.yml` `ignore:` to the current
 ids. It keeps comments and every other line. When one old id matches several
 mutants, it writes every new id. That keeps the 1.x match. An id that matches
-nothing stays, and the command exits 1. A block scalar under `ignore:`
+nothing stays, and the command exits 1. In an `{ id:, reason: }` entry, the
+id changes and the reason stays. One entry holds one id, so an old id there
+that now matches several mutants stays as written: the command names the new
+ids, exits 1, and you split the entry by hand. A block scalar under `ignore:`
 is not supported: the command exits 2 and does not change the file.
 `--dry-run` prints each change and writes nothing.
 
@@ -358,9 +361,12 @@ and once they pass 10% of the attempted mutants the run fails.
 Some mutants are equivalent (behaviour-identical) and survive forever — keeping a
 file off 100%. Suppress them so the score and `--threshold` gate stay meaningful:
 
-- **Inline:** `some_line # mutineer:disable-line` (or scope it: `# mutineer:disable-line comparison`). Put a reason after `--`: `# mutineer:disable-line comparison -- the test checks only 20`.
-- **Config:** a `.mutineer.yml` `ignore:` list of mutant ids. Each survivor's
-  `id` is printed in the JSON report, so copy it straight into `ignore:`.
+- **Inline:** `some_line # mutineer:disable-line` (or scope it: `# mutineer:disable-line comparison`). Put a reason after `--`: `# mutineer:disable-line comparison -- the test checks only 20`. The reason is stored on the ignored mutant and shown in the JSON report and the HTML report. A marker with no reason stores none.
+- **Config:** a `.mutineer.yml` `ignore:` list. A bare mutant id still works. A mapping is `id` plus an optional `reason`. Mutineer 1.9 is the first version that reads a mapping. Older versions do not understand one. The reason shows in the same reports as an inline reason. Each survivor's `id` is printed in the JSON report.
+
+`mutineer triage REPORT.json --reason TEXT --all` prints one mapping entry per survivor. `--id ID` prints one entry. Repeat `--id` for several. The command does not edit files. Paste the lines under `ignore:`.
+
+Built-in skips are listed on the [equivalent skips](https://davidteren.github.io/mutineer/equivalent-skips.html) page. There is no switch to turn them off.
 
 Suppressed mutants are excluded from the score (so 100% becomes reachable).
 

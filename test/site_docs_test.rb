@@ -76,6 +76,15 @@ class SiteDocsTest < Minitest::Test
     assert_empty MutineerSiteDocs.stale_files
   end
 
+  # Every built-in chain-link skip is named on the published page.
+  def test_equivalent_skips_page_names_every_chain_link_skip
+    page = File.read("docs/equivalent-skips.html")
+    Mutineer::Mutators::ChainLink::SKIPPED.each do |name|
+      assert_includes page, ">#{name}<", "equivalent-skips.html is missing #{name}"
+    end
+    assert_includes page, "endless"
+  end
+
   # The Rails guide is in the primary nav, and every YAML recipe parses.
   def test_rails_guide_is_linked_and_its_yaml_parses
     %w[docs/index.html docs/agentic-coding.html docs/sample-report.html docs/rails.html].each do |path|
