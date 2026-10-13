@@ -3,6 +3,7 @@
 require "json"
 require "tempfile"
 require_relative "child_stdout"
+require_relative "child_coverage"
 require_relative "orphan_guard"
 
 module Mutineer
@@ -296,6 +297,7 @@ module Mutineer
           code =
             begin
               ChildStdout.silence
+              ChildCoverage.allow_start
               close_protocol
               # Route THIS fork at its own worker database before any test loads.
               # A routing failure raises here and is scored `error`, never a false verdict.

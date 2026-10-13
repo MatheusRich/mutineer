@@ -64,6 +64,23 @@ class DaemonCoverageTest < Minitest::Test
     end
   end
 
+  # #248: SimpleCov in a test helper calls `Coverage.start` when Coverage is not
+  # running. On the suspended Coverage of #228 that raised, and every mutant
+  # scored `error`. The payload makes the same call before the tests load.
+  def test_a_helper_can_start_coverage_in_a_mutant_after_the_map_is_built
+    src = File.join(APP, "app/models/order.rb")
+    client = Mutineer::DaemonClient.new(boot: boot_config("order_test.rb"), app_root: APP).start
+    begin
+      refute_empty client.coverage["map"]
+      code = %(Coverage.start(lines: true) unless Coverage.running?\n#{File.read(src)})
+      verdict = client.request(id: 1, payload: { "code" => code, "source_file" => src },
+                               tests: [File.join(APP, "test/models/order_test.rb")], timeout: 30)
+      assert_equal "survived", verdict
+    ensure
+      client.quit
+    end
+  end
+
   # #187: PriceList's class body runs at boot (a to_prepare initializer), so its
   # `price` line ran before any test. The daemon ships those load lines, and the
   # mutant is ran_at_load, not a false no_coverage.
