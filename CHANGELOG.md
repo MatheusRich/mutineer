@@ -13,12 +13,47 @@ All notable changes to this project are documented here. The format is based on
   A second run cannot drop a database another live run holds. An app with
   more than one database config runs one worker and says so once. MySQL is
   unchanged. The worker databases stay after the run.
-
+- **`mutineer init`.** It writes a commented `.mutineer.yml` with the default
+  operators. `since` stays commented, so the first run is a full scan.
+  `init --rails` also sets `rails: true` and prints the first run command.
+  An existing file is kept unless you pass `--force`.
+- **Rails rollout guide.** The page walks from one model, to a report-only CI
+  job, to a `--since` and `--baseline` pull request gate, to `--threshold`
+  on chosen folders. It has a GitHub Actions recipe and a GitLab CI recipe.
 - **A production-ready section and a stability contract.** The README opens
   with a support matrix for Ruby, database, framework, and parallelism.
   `STABILITY.md` lists what a release keeps and what 2.0 will change.
   `SECURITY.md`, `CONTRIBUTING.md`, and GitHub issue forms are new.
   The docs home page takes the same section from the README at site build.
+- **`--allow-empty` and `allow_empty:`.** A run with no mutants now warns
+  that Mutineer 2.0 will fail it, unless `--allow-empty` marks it as expected.
+  A `--since` run whose changes hold no mutants does not warn: it says the
+  changes hold nothing to test. A `--since` run with no mutants even before
+  scoping still warns. The exit code does not change in 1.x.
+- **`--no-daemon`.** It beats a `.mutineer.yml` `daemon: true` for one run,
+  like `--no-fail-fast`. A Minitest `--rails` run without a `daemon` value now
+  prints a notice that 2.0 uses `--daemon` by default for `--rails`;
+  `--no-daemon` (or `daemon: false`) keeps the run serial and stops the
+  notice.
+- **"Did you mean" hints.** Unknown names in `--operators`, in
+  `.mutineer.yml` `operators:` and keys, and in `# mutineer:disable-line`
+  markers get the closest valid name. The `.mutineer.yml` warnings also say
+  that 2.0 makes them errors.
+
+### Changed
+
+- **`--test-command` exit codes 126 and 127 are scored `error`, not
+  `killed`.** A wrapper that could not start the suite ran no test. Under
+  `--threshold`, such a run can now score lower or fail the no-verdict limit,
+  where before it passed on false kills.
+- **A run with errored mutants and no `--threshold` says so.** Errors are not
+  in the score, so they do not fail the run; the message says what
+  `--threshold` would enforce.
+- **`--since` also narrows suppressed mutants.** A scoped report lists only
+  `ignored` mutants on changed lines, as `--dry-run --since` already did.
+- **The empty-run message moved from the human report to one stderr warning
+  for every format.** "No mutations generated" is gone. An empty `--since`
+  run prints "nothing to test in the changes since REF" instead.
 
 ### Fixed
 
