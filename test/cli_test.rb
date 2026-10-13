@@ -96,6 +96,13 @@ class CliTest < Minitest::Test
     end
   end
 
+  def test_triage_without_a_reason_is_usage_not_an_unknown_command
+    _, err, status = mutineer("triage", "report.json", "--all")
+    assert_equal 2, status.exitstatus
+    assert_includes err, "--reason"
+    refute_includes err, "unknown command"
+  end
+
   def test_list_operators_shows_default_and_disabled
     out, _, status = mutineer("--list-operators")
     assert_equal 0, status.exitstatus
@@ -678,7 +685,7 @@ class CliTest < Minitest::Test
                               "--format", "json", "--output", "report.json", chdir: proj)
       assert_equal 0, status.exitstatus
       doc = JSON.parse(File.read(File.join(proj, "report.json")))
-      assert_equal "1.7", doc["schema_version"]
+      assert_equal "1.8", doc["schema_version"]
       assert_equal 100.0, doc["summary"]["score"]
     end
   end
@@ -817,7 +824,7 @@ class CliTest < Minitest::Test
       out, _, status = mutineer("run", "lib", "--format", "json", chdir: proj)
       assert_equal 0, status.exitstatus
       doc = JSON.parse(out)
-      assert_equal "1.7", doc["schema_version"]
+      assert_equal "1.8", doc["schema_version"]
       per = doc["per_source"].sort_by { |h| h["file"] }
       assert_equal ["lib/calc.rb", "lib/greeter.rb"], per.map { |h| h["file"] }
       assert_equal 100.0, per.find { |h| h["file"] == "lib/greeter.rb" }["score"]
@@ -1232,6 +1239,33 @@ class CliTest < Minitest::Test
           - arithmetic
       YML
       assert_equal ["[mutineer] #{old1} -> #{new1}", "[mutineer] #{old2} -> #{new2}"], out.lines.map(&:chomp)
+    end
+  end
+
+  # Plans 003 and 007 meet here: an ignore: mapping keeps its reason when
+  # migrate rewrites the old id inside it.
+  def test_migrate_rewrites_an_old_id_inside_a_mapping_entry_and_keeps_its_reason
+    with_project do |proj|
+      (old1, new1), (old2, new2) = arithmetic_id_pairs(proj)
+      path = File.join(proj, ".mutineer.yml")
+      File.write(path, <<~YML)
+        ignore:
+          - id: #{old1}
+            reason: same value either way
+          - { id: #{old2}, reason: "inline form" }
+        operators:
+          - arithmetic
+      YML
+      _, err, status = mutineer("migrate", "calculator.rb", chdir: proj)
+      assert_equal 0, status.exitstatus, err
+      assert_equal <<~YML, File.read(path)
+        ignore:
+          - id: #{new1}
+            reason: same value either way
+          - { id: #{new2}, reason: "inline form" }
+        operators:
+          - arithmetic
+      YML
     end
   end
 

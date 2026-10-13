@@ -8,6 +8,19 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- **Reasons on ignored mutants.** Text after `--` on
+  `# mutineer:disable-line`, and a `.mutineer.yml` `ignore:` mapping
+  (`id` plus `reason`), is stored on the ignored mutant. The JSON report
+  (`schema_version` 1.8) and the HTML report show it. A mapping with no
+  `id`, or with an unknown key, warns. Mutineer 1.9 is the first version
+  that reads a mapping. Older versions do not understand one.
+  `mutineer migrate` rewrites the old id inside a mapping and keeps its
+  reason.
+- **`mutineer triage`.** It prints `ignore:` mapping entries for survivors
+  in a JSON report. `--reason` is required. Pass `--all` or `--id`. It
+  does not edit files.
+- **Equivalent-skip page.** The docs list every built-in chain-link skip
+  and the endless-range skip, and why each one is equivalent.
 - **Postgres worker databases for `--rails --daemon`.** Each worker gets
   `<base>-mutineer-<N>`, copied from the test database before mutants run.
   A second run cannot drop a database another live run holds. An app with
