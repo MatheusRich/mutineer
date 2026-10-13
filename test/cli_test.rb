@@ -1242,6 +1242,33 @@ class CliTest < Minitest::Test
     end
   end
 
+  # Plans 003 and 007 meet here: an ignore: mapping keeps its reason when
+  # migrate rewrites the old id inside it.
+  def test_migrate_rewrites_an_old_id_inside_a_mapping_entry_and_keeps_its_reason
+    with_project do |proj|
+      (old1, new1), (old2, new2) = arithmetic_id_pairs(proj)
+      path = File.join(proj, ".mutineer.yml")
+      File.write(path, <<~YML)
+        ignore:
+          - id: #{old1}
+            reason: same value either way
+          - { id: #{old2}, reason: "inline form" }
+        operators:
+          - arithmetic
+      YML
+      _, err, status = mutineer("migrate", "calculator.rb", chdir: proj)
+      assert_equal 0, status.exitstatus, err
+      assert_equal <<~YML, File.read(path)
+        ignore:
+          - id: #{new1}
+            reason: same value either way
+          - { id: #{new2}, reason: "inline form" }
+        operators:
+          - arithmetic
+      YML
+    end
+  end
+
   def test_migrate_dry_run_prints_changes_and_writes_nothing
     with_project do |proj|
       pairs = arithmetic_id_pairs(proj)

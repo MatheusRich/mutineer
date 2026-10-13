@@ -233,8 +233,10 @@ module Mutineer
 
     # Rewrites old-format ids in the loaded `.mutineer.yml` `ignore:` list.
     # Prints each change. With `--dry-run`, writes nothing. Exits 1 when any
-    # bare id matched no mutant in these sources and operators. That id stays
-    # in the file. Exits 0 when every bare id is current or was rewritten.
+    # id matched no mutant in these sources and operators, or when an id in a
+    # `{ id:, reason: }` entry now matches several mutants (split it by hand).
+    # Those ids stay in the file. Exits 0 when every id is current or was
+    # rewritten.
     # An unsupported `ignore:` shape exits 2 and leaves the file unchanged.
     #
     # @param config [Mutineer::Config] run configuration, sources already set.
@@ -251,9 +253,13 @@ module Mutineer
         warn "[mutineer] ignore entry #{id} matched no mutant in these sources and operators. " \
              "It was left in place."
       end
+      outcome.split.each do |rep|
+        warn "[mutineer] ignore entry #{rep.old_id} has a reason and now matches several mutants " \
+             "(#{rep.new_ids.join(', ')}). Split it into one entry per id by hand. It was left in place."
+      end
       warn "[mutineer] dry run: .mutineer.yml was not changed" if config.dry_run
       replace_file(file_path, outcome.text) if !config.dry_run && outcome.text != text
-      exit(outcome.unmapped.empty? ? 0 : 1)
+      exit(outcome.unmapped.empty? && outcome.split.empty? ? 0 : 1)
     rescue ArgumentError => e
       warn "mutineer: #{e.message}"
       exit 2

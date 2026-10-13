@@ -14,6 +14,8 @@ All notable changes to this project are documented here. The format is based on
   (`schema_version` 1.8) and the HTML report show it. A mapping with no
   `id`, or with an unknown key, warns. Mutineer 1.9 is the first version
   that reads a mapping. Older versions do not understand one.
+  `mutineer migrate` rewrites the old id inside a mapping and keeps its
+  reason.
 - **`mutineer triage`.** It prints `ignore:` mapping entries for survivors
   in a JSON report. `--reason` is required. Pass `--all` or `--id`. It
   does not edit files.

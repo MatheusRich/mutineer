@@ -120,7 +120,10 @@ mutineer migrate <source...> [--dry-run] [--operators LIST]
 `migrate` rewrites old-format ids in `.mutineer.yml` `ignore:` to the current
 ids. It keeps comments and every other line. When one old id matches several
 mutants, it writes every new id. That keeps the 1.x match. An id that matches
-nothing stays, and the command exits 1. A block scalar under `ignore:`
+nothing stays, and the command exits 1. In an `{ id:, reason: }` entry, the
+id changes and the reason stays. One entry holds one id, so an old id there
+that now matches several mutants stays as written: the command names the new
+ids, exits 1, and you split the entry by hand. A block scalar under `ignore:`
 is not supported: the command exits 2 and does not change the file.
 `--dry-run` prints each change and writes nothing.
 

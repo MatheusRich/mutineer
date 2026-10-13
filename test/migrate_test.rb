@@ -57,6 +57,25 @@ class MigrateTest < Minitest::Test
     end
   end
 
+  # A mapping holds one id, so an old id there that now matches two mutants
+  # is left in place and reported for a hand split.
+  def test_a_mapping_whose_old_id_now_matches_two_mutants_is_left_for_a_hand_split
+    Dir.mktmpdir("mutineer-migrate") do |root|
+      %w[a.rb b.rb].each { |file| File.write(File.join(root, file), "class Shared\n  def f(a) = a + 1\nend\n") }
+      sources = %w[a.rb b.rb].map { |file| File.join(root, file) }
+      config = Mutineer::Config.new(sources: sources, project_root: root, operators: ["arithmetic"])
+      current, old_to_new = Mutineer::Migrate.id_maps(config)
+      old_a, new_a = pair(root, "a.rb")
+      _, new_b = pair(root, "b.rb")
+
+      text = "ignore:\n  - id: #{old_a}\n    reason: same either way\n"
+      outcome = Mutineer::Migrate.rewrite(text, current, old_to_new)
+      assert_equal text, outcome.text
+      assert_equal [[old_a, [new_a, new_b]]], outcome.split.map { |r| [r.old_id, r.new_ids] }
+      assert_empty outcome.replacements
+    end
+  end
+
   # A method renamed since the id was stored matches nothing. The id stays.
   def test_an_id_from_a_renamed_method_is_unmapped
     text = "ignore:\n  - 0123456789ab # renamed\n"
@@ -89,13 +108,53 @@ class MigrateTest < Minitest::Test
     assert_equal "ignore:\n- bbbbbbbbbbbb\nthreshold: 0\n", block.text
   end
 
-  # Plan 007 owns `{ id:, reason: }` entries. This rewrite leaves them.
-  def test_hash_entry_is_left_untouched
-    text = "ignore:\n  - id: aaaaaaaaaaaa\n    reason: later\n"
-    outcome = Mutineer::Migrate.rewrite(text, Set.new, { "aaaaaaaaaaaa" => ["bbbbbbbbbbbb"] })
-    assert_equal text, outcome.text
-    assert_empty outcome.unmapped
-    assert_empty outcome.replacements
+  # A `{ id:, reason: }` entry (plan 007) keeps its reason; only the id
+  # changes, in block form, flow form, or with the id after the reason.
+  def test_mapping_entry_id_is_rewritten_and_its_reason_kept
+    old_to_new = { "aaaaaaaaaaaa" => ["bbbbbbbbbbbb"] }
+    {
+      "ignore:\n  - id: aaaaaaaaaaaa\n    reason: later\n" => "ignore:\n  - id: bbbbbbbbbbbb\n    reason: later\n",
+      "ignore:\n  - { id: \"aaaaaaaaaaaa\", reason: x }\n" => "ignore:\n  - { id: \"bbbbbbbbbbbb\", reason: x }\n",
+      "ignore:\n  - reason: later\n    id: aaaaaaaaaaaa\n" => "ignore:\n  - reason: later\n    id: bbbbbbbbbbbb\n"
+    }.each do |text, want|
+      outcome = Mutineer::Migrate.rewrite(text, Set.new, old_to_new)
+      assert_equal want, outcome.text, text
+      assert_equal ["aaaaaaaaaaaa"], outcome.replacements.map(&:old_id)
+      assert_empty outcome.unmapped
+    end
+  end
+
+  # cubic on #241: comments and reason text are never ids, and a mapping
+  # inside an inline ignore: [...] list is rewritten too.
+  def test_mapping_rewrite_skips_comments_and_reason_text_and_covers_inline_lists
+    old_to_new = { "aaaaaaaaaaaa" => ["bbbbbbbbbbbb"], "cccccccccccc" => ["dddddddddddd"] }
+    {
+      "ignore:\n  # - id: cccccccccccc\n  - id: aaaaaaaaaaaa\n" =>
+        "ignore:\n  # - id: cccccccccccc\n  - id: bbbbbbbbbbbb\n",
+      "ignore:\n  - id: aaaaaaaaaaaa\n    reason: \"dup of id: cccccccccccc\"\n" =>
+        "ignore:\n  - id: bbbbbbbbbbbb\n    reason: \"dup of id: cccccccccccc\"\n",
+      "ignore:\n  - { reason: \"see id: cccccccccccc\", id: aaaaaaaaaaaa }\n" =>
+        "ignore:\n  - { reason: \"see id: cccccccccccc\", id: bbbbbbbbbbbb }\n",
+      "ignore: [{ id: aaaaaaaaaaaa, reason: x }, cccccccccccc]\n" =>
+        "ignore: [{ id: bbbbbbbbbbbb, reason: x }, dddddddddddd]\n"
+    }.each do |text, want|
+      outcome = Mutineer::Migrate.rewrite(text, Set.new, old_to_new)
+      assert_equal want, outcome.text, text
+      assert_empty outcome.unmapped, text
+    end
+  end
+
+  # A reason that repeats the id after a comma is still text: only the key
+  # position changes. A mapping with the id key twice is refused, not guessed.
+  def test_flow_mapping_id_key_is_found_exactly_or_refused
+    old_to_new = { "aaaaaaaaaaaa" => ["bbbbbbbbbbbb"] }
+    text = "ignore:\n  - { id: aaaaaaaaaaaa, reason: \"x, id: aaaaaaaaaaaa\" }\n"
+    assert_equal "ignore:\n  - { id: bbbbbbbbbbbb, reason: \"x, id: aaaaaaaaaaaa\" }\n",
+                 Mutineer::Migrate.rewrite(text, Set.new, old_to_new).text
+
+    twice = "ignore:\n  - { id: aaaaaaaaaaaa, reason: x, id: aaaaaaaaaaaa }\n"
+    error = assert_raises(ArgumentError) { Mutineer::Migrate.rewrite(twice, Set.new, old_to_new) }
+    assert_includes error.message, "not supported"
   end
 
   # A flow list may put each id on its own line. The whole id changes, and a
@@ -181,8 +240,10 @@ class MigrateTest < Minitest::Test
       assert_includes error.message, "block scalar", text
     end
 
-    kept = "ignore:\n  - id: aaaaaaaaaaaa\n    reason: |\n      later\n"
-    assert_equal kept, Mutineer::Migrate.rewrite(kept, Set.new, old_to_new).text
+    # A block-scalar reason is not an id: the mapping's id is still rewritten.
+    mapping = "ignore:\n  - id: aaaaaaaaaaaa\n    reason: |\n      later\n"
+    assert_equal "ignore:\n  - id: bbbbbbbbbbbb\n    reason: |\n      later\n",
+                 Mutineer::Migrate.rewrite(mapping, Set.new, old_to_new).text
   end
 
   # The new text is written beside the original. A failed write removes that
