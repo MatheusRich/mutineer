@@ -76,7 +76,8 @@ class BootModeTest < Minitest::Test
 
   # #228: Coverage runs while the map is built, then is suspended, so no mutant
   # fork pays for it. The second run resumes it for a cache hit, which
-  # suspends it again.
+  # suspends it again. Each mutant fork stops the suspended Coverage, so a
+  # helper such as SimpleCov can start it (#248): the mutant sees it idle.
   def test_coverage_is_suspended_in_mutants_after_the_map_is_built
     # Another test in this process may have left Coverage running, which reads
     # as a host's Coverage (see the test below).
@@ -89,7 +90,7 @@ class BootModeTest < Minitest::Test
         run_boot(STATE, cache_dir: cache)
         states = File.readlines(log, chomp: true)
         # The capture (or the cache-hit clean check) first, then the mutant.
-        assert_equal %w[running suspended], states.chunk_while(&:==).map(&:first),
+        assert_equal %w[running idle], states.chunk_while(&:==).map(&:first),
                      "run #{i}: map built under Coverage, mutants run without it: #{states}"
       end
     ensure
