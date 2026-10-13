@@ -19,6 +19,18 @@ All notable changes to this project are documented here. The format is based on
   does not edit files.
 - **Equivalent-skip page.** The docs list every built-in chain-link skip
   and the endless-range skip, and why each one is equivalent.
+- **`mutineer init`.** It writes a commented `.mutineer.yml` with the default
+  operators. `since` stays commented, so the first run is a full scan.
+  `init --rails` also sets `rails: true` and prints the first run command.
+  An existing file is kept unless you pass `--force`.
+- **Rails rollout guide.** The page walks from one model, to a report-only CI
+  job, to a `--since` and `--baseline` pull request gate, to `--threshold`
+  on chosen folders. It has a GitHub Actions recipe and a GitLab CI recipe.
+- **A production-ready section and a stability contract.** The README opens
+  with a support matrix for Ruby, database, framework, and parallelism.
+  `STABILITY.md` lists what a release keeps and what 2.0 will change.
+  `SECURITY.md`, `CONTRIBUTING.md`, and GitHub issue forms are new.
+  The docs home page takes the same section from the README at site build.
 - **`--allow-empty` and `allow_empty:`.** A run with no mutants now warns
   that Mutineer 2.0 will fail it, unless `--allow-empty` marks it as expected.
   A `--since` run whose changes hold no mutants does not warn: it says the

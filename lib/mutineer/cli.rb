@@ -15,6 +15,7 @@ require_relative "kill_matrix"
 require_relative "baseline"
 require_relative "mutator_registry"
 require_relative "triage"
+require_relative "init"
 
 module Mutineer
   # Command-line entry point. `start` is the single public method called by
@@ -37,6 +38,9 @@ module Mutineer
         triage REPORT.json --reason TEXT
             (--id ID ... | --all)                    Print ignore: entries for
                                                      survivors. Does not edit files.
+        init [--rails] [--force]                     Write .mutineer.yml and print
+                                                     the first run command.
+                                                     --force replaces an existing file.
 
       Run options:
         --test FILE          Test file covering the sources (one per flag; repeat it)
@@ -100,6 +104,10 @@ module Mutineer
     def self.start(argv)
       if argv.first == "triage"
         exit Triage.run(argv[1..])
+      end
+
+      if argv.first == "init"
+        exit Init.run(argv[1..])
       end
 
       # The CLI layer holds only the fields the user typed, so Config.resolve

@@ -3,6 +3,7 @@
 require_relative "test_helper"
 require_relative "../rake/site_docs"
 require_relative "../rake/docs_contract"
+require "yaml"
 
 # #91: sitemap.xml and llms.txt stay generated from one catalog.
 #
@@ -31,6 +32,11 @@ class SiteDocsTest < Minitest::Test
   def test_committed_llms_txt_matches_a_fresh_generate
     source = File.read("docs/llms.txt")
     assert_equal MutineerSiteDocs.llms_txt(source), source
+  end
+
+  def test_llms_txt_links_to_the_production_ready_section
+    text = File.read("docs/llms.txt")
+    assert_includes text, "https://github.com/davidteren/mutineer#is-it-production-ready"
   end
 
   def test_llms_txt_lists_skill_md_under_optional
@@ -77,5 +83,26 @@ class SiteDocsTest < Minitest::Test
       assert_includes page, ">#{name}<", "equivalent-skips.html is missing #{name}"
     end
     assert_includes page, "endless"
+  end
+
+  # The Rails guide is in the primary nav, and every YAML recipe parses.
+  def test_rails_guide_is_linked_and_its_yaml_parses
+    %w[docs/index.html docs/agentic-coding.html docs/sample-report.html docs/rails.html].each do |path|
+      assert_includes File.read(path), 'href="rails.html"', path
+    end
+    assert_includes File.read("rake/docs_contract.rb"), 'href="rails.html"'
+    page = File.read("docs/rails.md")
+    assert_includes page, "One model locally"
+    assert_includes page, "Report-only in CI"
+    assert_includes page, "--since origin/main"
+    assert_includes page, "--baseline"
+    assert_includes page, "--threshold"
+    assert_includes page, "GitLab CI"
+    blocks = page.scan(/```yaml\n(.*?)```/m).flatten
+    assert_equal 2, blocks.size
+    blocks.each do |body|
+      loaded = YAML.safe_load(body)
+      assert_kind_of Hash, loaded
+    end
   end
 end

@@ -1,6 +1,8 @@
 # Mutineer
 
 [![Gem Version](https://img.shields.io/gem/v/mutineer?logo=rubygems&color=e23b3b)](https://rubygems.org/gems/mutineer)
+[![CI](https://github.com/davidteren/mutineer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/davidteren/mutineer/actions/workflows/ci.yml)
+[![mutation score at least 85%](https://img.shields.io/badge/mutation%20score-at%20least%2085%25-67286a)](https://github.com/davidteren/mutineer/actions/workflows/ci.yml)
 [![GitHub Marketplace](https://img.shields.io/badge/Marketplace-Mutineer%20Ruby-2da44e?logo=githubactions&logoColor=white)](https://github.com/marketplace/actions/mutineer-ruby)
 [![Socket](https://img.shields.io/badge/Socket-security%20report-0a66c2?logo=socket&logoColor=white)](https://socket.dev/rubygems/package/mutineer)
 
@@ -26,6 +28,57 @@ for how the two tools differ.
   1 to 3 s, 3 to 7 s, and so on); files in one step run in path order.
 
 📖 **[mutineer.github.io →](https://davidteren.github.io/mutineer/)** — overview, operators, and usage.
+
+## Is it production-ready?
+
+Read this section before you gate an app on Mutineer.
+Use the Status column to decide.
+Adopt a row whose Status says supported or serial only.
+Not supported in the Parallelism column means `--daemon` cannot run that row.
+
+Mutineer itself needs Ruby 3.4 or later.
+In-process runs fork, so use Linux or macOS.
+A plain Ruby project with no database is supported.
+It runs in parallel on those systems.
+
+<!-- contract:support-matrix -->
+| Ruby | Database | Framework | Parallelism | Status |
+| --- | --- | --- | --- | --- |
+| 3.4 or later | SQLite file | Minitest | supported with `--daemon` | supported |
+| 3.4 or later | SQLite file | RSpec | not supported | serial only |
+| 3.4 or later | PostgreSQL | Minitest | not supported | serial only |
+| 3.4 or later | PostgreSQL | RSpec | not supported | serial only |
+| 3.4 or later | MySQL | Minitest | not supported | serial only |
+| 3.4 or later | MySQL | RSpec | not supported | serial only |
+| 3.4 or later | SQLite in memory | Minitest | not supported | serial only |
+| 3.4 or later | SQLite in memory | RSpec | not supported | serial only |
+| 3.4 or later | more than one database | Minitest | not supported | serial only |
+| 3.4 or later | more than one database | RSpec | not supported | serial only |
+
+This matrix is for a Rails app on Ruby 3.4 or later.
+`supported` means you can run that cell in parallel.
+`serial only` means the safe run uses one worker.
+`not supported` means `--daemon` cannot run that cell.
+SQLite file means a database file, not `:memory:`.
+Minitest on that file can use `--daemon`.
+RSpec on that file is serial only.
+PostgreSQL is serial only.
+MySQL is serial only.
+A `:memory:` database is serial only.
+An app with more than one database is serial only.
+`--daemon` isolates only the primary connection.
+`--rails` without `--daemon` is serial on every row.
+
+<!-- /contract:support-matrix -->
+
+An app on an older Ruby uses `--test-command`.
+Mutineer still runs on Ruby 3.4 or later.
+That path is serial.
+It does not narrow tests by coverage.
+A crash in the command can count as a kill.
+
+What a release will not break is in
+[STABILITY.md](https://github.com/davidteren/mutineer/blob/main/STABILITY.md).
 
 ## Install
 
@@ -140,6 +193,16 @@ Add Mutineer to your Gemfile's test group:
 gem "mutineer", group: :test, require: false
 ```
 
+Start from one command. It writes `.mutineer.yml` and prints the first run.
+It does not replace a file you already wrote. Pass `--force` to replace one.
+
+```sh
+RAILS_ENV=test bundle exec mutineer init --rails
+```
+
+The path from that first report to a CI gate is the
+[Rails rollout guide](https://davidteren.github.io/mutineer/rails.html).
+
 ### Faster, parallel-safe Rails (the `--daemon` backend)
 
 `--rails` boots your app once but runs mutants **serially** — parallel `--jobs`
@@ -236,11 +299,13 @@ Mutineer also surfaces a targeted smoke-check message when Bundler prints
 Tradeoffs — this path is correct but not free:
 
 - **Slower:** your app re-boots for every mutant (no shared boot yet).
-- **No coverage narrowing:** every mutant runs the *full* `--test` set, so the
-  score is an **upper bound and not comparable to an in-process (`--rails`)
-  score** — uncovered mutants count as survivors, and an infrastructure failure
-  is scored as a kill. Exit codes 126 and 127 (the command could not start) are
-  scored `error` instead. Mutineer prints this caveat on every run and aborts up
+- **No coverage narrowing:** every mutant runs the full `--test` set.
+  The run is serial.
+  A crash in the command can count as a kill.
+  Uncovered mutants count as survivors.
+  Do not compare a `--test-command` score with an in-process score.
+  Exit codes 126 and 127 (the command could not start) are scored `error`.
+  Mutineer prints this caveat on every run and aborts up
   front (a "smoke check") if your unmutated suite isn't green.
 - **Reload strategy only** (`--strategy redefine` is rejected on this path) and
   **serial** (`--jobs` is forced to 1). For apps on Ruby ≥ 3.4, `--daemon` gives
