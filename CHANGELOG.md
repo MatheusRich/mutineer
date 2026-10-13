@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- **Postgres worker databases for `--rails --daemon`.** Each worker gets
+  `<base>-mutineer-<N>`, copied from the test database before mutants run.
+  A second run cannot drop a database another live run holds. An app with
+  more than one database config runs one worker and says so once. MySQL is
+  unchanged. The worker databases stay after the run.
 - **`mutineer migrate`.** It rewrites old-format ids in `.mutineer.yml`
   `ignore:` to the current ids. It keeps comments and every other line.
   One old id that matches several mutants becomes every new id. An id that
@@ -59,6 +64,12 @@ All notable changes to this project are documented here. The format is based on
 - **The empty-run message moved from the human report to one stderr warning
   for every format.** "No mutations generated" is gone. An empty `--since`
   run prints "nothing to test in the changes since REF" instead.
+
+### Fixed
+
+- **A Rails daemon boots again while a mutant file is still open.**
+  The file stays when another process holds it. The next boot skips
+  that file name instead of stopping.
 
 ## [1.6.0] - 2026-10-08
 
