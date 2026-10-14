@@ -71,7 +71,9 @@ module Mutineer
     # @param pid [Integer]
     # @return [Boolean]
     def self.zombie?(pid)
-      File.read("/proc/#{pid}/stat")[/\) (\S)/, 1] == "Z"
+      stat = File.read("/proc/#{pid}/stat")
+      # The name before the state is in parentheses and may hold ") " itself.
+      stat[stat.rindex(")") + 2] == "Z"
     rescue SystemCallError
       false
     end

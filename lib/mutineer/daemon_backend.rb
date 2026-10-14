@@ -316,6 +316,16 @@ module Mutineer
       # Every job was popped by some worker and every pop assigns, so no slot can
       # be nil here: an escaping exception aborts the run via join instead.
       results
+    ensure
+      # Ctrl-C lands in this thread and skips the joins above. Stop the workers
+      # here too, so each one quits its daemon before the end-of-run sweep, as
+      # the serial path does.
+      queue&.clear
+      threads&.each do |thread|
+        thread.kill.join
+      rescue StandardError
+        nil # its error was already raised above, or the run is being interrupted
+      end
     end
 
     # Build the payload for one job, run it on the given daemon/worker, and attach

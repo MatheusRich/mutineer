@@ -131,7 +131,7 @@ class DaemonTempSweepTest < Minitest::Test
 
     zombie = fork { exit!(0) }
     deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
-    sleep 0.01 until File.read("/proc/#{zombie}/stat")[/\) (\S)/, 1] == "Z" ||
+    sleep 0.01 until File.read("/proc/#{zombie}/stat").split(") ").last.start_with?("Z") ||
                      Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
     Dir.mktmpdir do |dir|
       path = File.join(dir, "mutineer_daemon20200101-#{zombie}-zombie.rb")
