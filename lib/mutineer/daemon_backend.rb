@@ -292,10 +292,10 @@ module Mutineer
             results[i] = job_result(jobs[i], i, client, worker, config, coverage_map, abs_tests, source_map)
             progress.tick
           end
-        rescue DaemonBootError
-          # The daemon gave up for good. Stop feeding the other workers rather
-          # than letting them score the rest of the run against a dead client;
-          # Thread#join re-raises this and ends the run.
+        rescue StandardError
+          # The daemon gave up for good, or a defect escaped. Stop feeding the
+          # other workers rather than letting them score the rest of the run
+          # first; the join below re-raises this and ends the run.
           queue.clear
           raise
         ensure
