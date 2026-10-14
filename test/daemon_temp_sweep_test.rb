@@ -124,6 +124,26 @@ class DaemonTempSweepTest < Minitest::Test
     end
   end
 
+  # #250: where pid 1 does not reap orphans (a container without init), a
+  # killed mutant child stays a zombie. It owns nothing, so its file goes.
+  def test_sweep_removes_a_file_whose_owner_is_a_zombie
+    skip "zombie detection reads /proc (Linux only)" unless File.exist?("/proc/self/stat")
+
+    zombie = fork { exit!(0) }
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
+    sleep 0.01 until File.read("/proc/#{zombie}/stat")[/\) (\S)/, 1] == "Z" ||
+                     Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "mutineer_daemon20200101-#{zombie}-zombie.rb")
+      File.write(path, "module ZombieOwned; end\n")
+
+      assert_empty Mutineer::JobPlan.sweep_orphans([dir], "mutineer_daemon*.rb")
+      refute_path_exists path, "a zombie owner must not keep its file"
+    end
+  ensure
+    Process.waitpid(zombie) if zombie
+  end
+
   def read_child_path(reader)
     flunk "child did not create the mutant file" unless IO.select([reader], nil, nil, 5)
 
