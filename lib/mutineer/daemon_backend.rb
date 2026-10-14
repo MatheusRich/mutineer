@@ -253,8 +253,9 @@ module Mutineer
     # A shared queue of job indices feeds N tool-side threads; results are placed by
     # input index so the verdict set matches serial. Callers must not pass fail_fast
     # here ({execute} forces serial for fail-fast). Per-mutant crashes are classified
-    # in {job_result}, shared with the serial path; a {DaemonBootError} ends the run
-    # here rather than scoring the remainder against a daemon that has given up.
+    # in {job_result}, shared with the serial path. Any error that escapes a worker
+    # (a {DaemonBootError}, or a defect) clears the queue, and the run ends once
+    # every worker has joined, rather than scoring the remainder first.
     #
     # @api private
     # @return [Array<Mutineer::Result>] one result per input job, in input order.
@@ -320,11 +321,13 @@ module Mutineer
       # Ctrl-C lands in this thread and skips the joins above. Stop the workers
       # here too, so each one quits its daemon before the end-of-run sweep, as
       # the serial path does.
+      # Kill them all first, so their daemons quit at the same time.
       queue&.clear
+      threads&.each(&:kill)
       threads&.each do |thread|
-        thread.kill.join
-      rescue StandardError
-        nil # its error was already raised above, or the run is being interrupted
+        thread.join
+      rescue Exception # rubocop:disable Lint/RescueException
+        nil # already raised above, or the run is being interrupted
       end
     end
 
