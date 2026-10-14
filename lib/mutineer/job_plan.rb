@@ -416,13 +416,14 @@ module Mutineer
     #
     # @param dirs [Array<String>] directories to sweep.
     # @param glob [String] filename pattern to remove.
-    # @return [void]
+    # @return [Array<String>] the files left in place because a process owns them.
     def self.sweep_orphans(dirs, glob = "mutineer_mutant*.rb")
-      dirs.each do |dir|
-        Dir.glob(File.join(dir, glob)).each do |path|
-          next if OrphanGuard.mutant_file_in_use?(path)
+      dirs.flat_map do |dir|
+        Dir.glob(File.join(dir, glob)).select do |path|
+          next true if OrphanGuard.mutant_file_in_use?(path)
 
           File.unlink(path) rescue nil # rubocop:disable Style/RescueModifier
+          false
         end
       end
     end

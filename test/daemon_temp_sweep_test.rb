@@ -124,17 +124,6 @@ class DaemonTempSweepTest < Minitest::Test
     end
   end
 
-  def unused_pid
-    (100_000..100_500).find do |candidate|
-      Process.kill(0, candidate)
-      false
-    rescue Errno::ESRCH
-      true
-    rescue Errno::EPERM
-      false
-    end || flunk("no unused pid")
-  end
-
   def read_child_path(reader)
     flunk "child did not create the mutant file" unless IO.select([reader], nil, nil, 5)
 

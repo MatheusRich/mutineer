@@ -34,6 +34,10 @@ module Mutineer
     # require_relative resolves. Kept in step with DaemonServer#sweep_temps.
     DAEMON_TEMP_GLOB = "mutineer_daemon*.rb"
 
+    # Seconds the end-of-run sweep waits for an orphaned child to die. Its
+    # watchdog notices a dead daemon within {OrphanGuard::POLL}.
+    SWEEP_GRACE = (OrphanGuard::POLL * 2) + 0.5
+
     # Full daemon run: collect jobs, build the coverage map once, then execute
     # serially or across N worker daemons. Fail-fast forces serial so the survivor
     # set matches jobs 1.
@@ -83,17 +87,14 @@ module Mutineer
       sweep_daemon_temps(config)
     end
 
-    # Seconds the end-of-run sweep waits for an orphaned child to die. Its
-    # watchdog notices a dead daemon within {OrphanGuard::POLL}.
-    SWEEP_GRACE = (OrphanGuard::POLL * 2) + 0.5
-
     # Removes daemon mutant files left in the source dirs, on every exit path.
     # The daemon sweeps at boot, but an empty run boots nothing, and a daemon
     # that dies mid-mutant orphans a child that lives on until its watchdog
     # fires (#250). The respawned daemon sweeps before that, and a run that
     # ends or aborts right after the crash does too. So a file whose owner is
-    # still alive gets a short grace to go. A clean run leaves no file and pays
-    # nothing. A file a concurrent run still owns stays in place.
+    # still alive gets {SWEEP_GRACE} to go. A clean run leaves no file and pays
+    # nothing. A file a concurrent run still owns stays in place, but looks the
+    # same as a dying child's, so this run then waits the full grace.
     #
     # @param config [Mutineer::Config] the run config.
     # @return [void]
@@ -101,8 +102,7 @@ module Mutineer
       dirs = JobPlan.source_dirs(config)
       deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + SWEEP_GRACE
       loop do
-        JobPlan.sweep_orphans(dirs, DAEMON_TEMP_GLOB)
-        break if dirs.none? { |dir| Dir.glob(File.join(dir, DAEMON_TEMP_GLOB)).any? }
+        break if JobPlan.sweep_orphans(dirs, DAEMON_TEMP_GLOB).empty?
         break if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
 
         sleep 0.1

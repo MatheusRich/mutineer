@@ -450,20 +450,4 @@ class DaemonBackendContractTest < Minitest::Test
                       "(#{healthy.seen.size} of #{many.size} jobs)"
     end
   end
-
-  private
-
-  # A pid no process owns. Pid 1 is alive (launchd or init), and a sweep leaves
-  # a live pid's file in place.
-  def unused_pid
-    pid = (100_000..100_500).find do |candidate|
-      Process.kill(0, candidate)
-      false
-    rescue Errno::ESRCH
-      true
-    rescue Errno::EPERM
-      false
-    end
-    pid || flunk("no unused pid")
-  end
 end
