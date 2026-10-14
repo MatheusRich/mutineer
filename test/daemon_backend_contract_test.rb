@@ -309,25 +309,30 @@ class DaemonBackendContractTest < Minitest::Test
     end
   end
 
-  # #250: a daemon that crashes mid-mutant orphans its child, and the respawned
-  # daemon's boot sweep runs before that child dies. The run sweeps once more at
-  # the end, so the file cannot outlive it and break the app's next boot.
-  def test_a_run_sweeps_daemon_temps_orphaned_during_the_run
+  # #250: a daemon that crashes mid-mutant orphans its child, which lives on
+  # until its watchdog fires. The run can end, or abort, first. The sweep
+  # waits that moment out, so the file cannot break the app's next boot.
+  def test_a_run_sweeps_a_daemon_temp_whose_child_dies_just_after_the_run
     with_jobs do |jobs, config, source_map|
-      orphan = File.join(config.project_root, "app/mutineer_daemon20260101-#{unused_pid}-abcdef.rb")
-      run_serial = lambda do |*|
+      child = fork do
+        sleep 0.3
+        exit!(0)
+      end
+      Thread.new { Process.wait(child) } # rubocop:disable ThreadSafety/NewThread
+      orphan = File.join(config.project_root, "app/mutineer_daemon20260101-#{child}-abcdef.rb")
+      aborting_run = lambda do |*|
         File.binwrite(orphan, "class Order; end\n")
-        []
+        raise Mutineer::DaemonBootError, "daemon gave up"
       end
       Mutineer::JobPlan.stub(:collect_jobs, [jobs, [], source_map, {}]) do
         Mutineer::DaemonBackend.stub(:prepare_run, [nil, 1]) do
-          Mutineer::DaemonBackend.stub(:run_serial, run_serial) do
-            Mutineer::DaemonBackend.execute(config, [])
+          Mutineer::DaemonBackend.stub(:run_serial, aborting_run) do
+            assert_raises(Mutineer::DaemonBootError) { Mutineer::DaemonBackend.execute(config, []) }
           end
         end
       end
 
-      refute_path_exists orphan, "a run must clear a daemon temp orphaned during it"
+      refute_path_exists orphan, "the run must clear the file once its child is gone"
     end
   end
 

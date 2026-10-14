@@ -51,14 +51,7 @@ module Mutineer
       # suppressed). Return before booting anything: the coverage daemon and the
       # worker daemons below each boot the whole app, and README documents
       # `--since origin/<base>` for PR CI, where a docs-only PR is routine.
-      if jobs.empty?
-        # The daemon sweeps orphaned temps at boot and nothing boots here, so sweep
-        # tool-side. A file a hard-killed run left in app/models breaks the app's own
-        # Zeitwerk boot, not just Mutineer's next run. A file a live run still owns
-        # is left in place.
-        JobPlan.sweep_orphans(JobPlan.source_dirs(config), DAEMON_TEMP_GLOB)
-        return [AggregateResult.new(ignored_results), source_map, extras]
-      end
+      return [AggregateResult.new(ignored_results), source_map, extras] if jobs.empty?
 
       # Worker count = resolved --jobs, capped at the job count (no idle daemons).
       # >1 → N concurrent daemon handles, each on its OWN worker DB (N-handles, the
@@ -79,20 +72,43 @@ module Mutineer
       coverage_map, worker_count = prepare_run(config, abs_tests, worker_count)
 
       results =
-        begin
-          if worker_count > 1
-            run_parallel(jobs, worker_count, config, abs_tests, coverage_map, source_map)
-          else
-            run_serial(jobs, config, abs_tests, coverage_map, source_map)
-          end
-        ensure
-          # A daemon that crashes mid-mutant orphans its child, and the respawned
-          # daemon sweeps before that child dies (#250). Sweep again once every
-          # daemon is gone, as the in-process path does.
-          JobPlan.sweep_orphans(JobPlan.source_dirs(config), DAEMON_TEMP_GLOB)
+        if worker_count > 1
+          run_parallel(jobs, worker_count, config, abs_tests, coverage_map, source_map)
+        else
+          run_serial(jobs, config, abs_tests, coverage_map, source_map)
         end
 
       [AggregateResult.new(results + ignored_results), source_map, extras]
+    ensure
+      sweep_daemon_temps(config)
+    end
+
+    # Seconds the end-of-run sweep waits for an orphaned child to die. Its
+    # watchdog notices a dead daemon within {OrphanGuard::POLL}.
+    SWEEP_GRACE = (OrphanGuard::POLL * 2) + 0.5
+
+    # Removes daemon mutant files left in the source dirs, on every exit path.
+    # The daemon sweeps at boot, but an empty run boots nothing, and a daemon
+    # that dies mid-mutant orphans a child that lives on until its watchdog
+    # fires (#250). The respawned daemon sweeps before that, and a run that
+    # ends or aborts right after the crash does too. So a file whose owner is
+    # still alive gets a short grace to go. A clean run leaves no file and pays
+    # nothing. A file a concurrent run still owns stays in place.
+    #
+    # @param config [Mutineer::Config] the run config.
+    # @return [void]
+    def self.sweep_daemon_temps(config)
+      dirs = JobPlan.source_dirs(config)
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + SWEEP_GRACE
+      loop do
+        JobPlan.sweep_orphans(dirs, DAEMON_TEMP_GLOB)
+        break if dirs.none? { |dir| Dir.glob(File.join(dir, DAEMON_TEMP_GLOB)).any? }
+        break if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+
+        sleep 0.1
+      end
+    rescue SystemCallError
+      nil # never replace the run's own result or exception with a cleanup error
     end
 
     # Build the coverage map via a short-lived daemon (boots the app once, captures
@@ -410,7 +426,7 @@ module Mutineer
     # tests drive directly: {boot_config} from the zero-dep suite and
     # {build_coverage_map} from the daemon suite. Everything else is daemon-pipeline
     # internals with no caller outside this file.
-    private_class_method :run_serial, :run_parallel, :job_result, :schema_path, :result_for,
+    private_class_method :sweep_daemon_temps, :run_serial, :run_parallel, :job_result, :schema_path, :result_for,
                          :prepare_run, :coverage_map_from_client
   end
 end
