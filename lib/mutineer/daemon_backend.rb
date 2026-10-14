@@ -277,7 +277,7 @@ module Mutineer
         raise
       end
 
-      clients.each_with_index.map do |client, worker|
+      threads = clients.each_with_index.map do |client, worker|
         Thread.new do
           # The abort below is re-raised by join and reported once there; without
           # this Ruby also dumps the thread's backtrace, which the serial path never
@@ -301,7 +301,17 @@ module Mutineer
         ensure
           client.quit
         end
-      end.each(&:join)
+      end
+      # Join every worker before re-raising, so all daemons have quit and the
+      # end-of-run sweep sees each child gone. The cleared queue stops the others
+      # after their current mutant.
+      failure = nil
+      threads.each do |thread|
+        thread.join
+      rescue StandardError => e
+        failure ||= e
+      end
+      raise failure if failure
 
       # Every job was popped by some worker and every pop assigns, so no slot can
       # be nil here: an escaping exception aborts the run via join instead.
