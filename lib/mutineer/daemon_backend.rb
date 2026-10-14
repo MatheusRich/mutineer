@@ -327,8 +327,10 @@ module Mutineer
       threads&.each(&:kill)
       threads&.each do |thread|
         thread.join
-      rescue Exception # rubocop:disable Lint/RescueException
-        nil # already raised above, or the run is being interrupted
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        # A worker's own error was already raised above. A second Ctrl-C lands
+        # here, in the main thread, and must still force the exit.
+        raise if e.is_a?(SignalException)
       end
     end
 
