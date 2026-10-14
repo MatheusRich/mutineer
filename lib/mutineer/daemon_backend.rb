@@ -266,14 +266,15 @@ module Mutineer
       jobs.each_index { |i| queue << i }
 
       # Built one at a time so a refused spawn part-way (EMFILE under a high --jobs)
-      # can still quit the daemons already up. Array.new would lose every reference.
+      # or a Ctrl-C can still quit the daemons already up. Each client joins the
+      # list before it starts, so one interrupted mid-boot is quit too.
       clients = []
       begin
         worker_count.times do
-          clients << DaemonClient.new(boot: boot_config(config, abs_tests),
-                                      app_root: config.project_root).start
+          clients << DaemonClient.new(boot: boot_config(config, abs_tests), app_root: config.project_root)
+          clients.last.start
         end
-      rescue StandardError
+      rescue Exception # rubocop:disable Lint/RescueException
         clients.each(&:quit)
         raise
       end
