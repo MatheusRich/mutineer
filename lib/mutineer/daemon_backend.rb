@@ -79,10 +79,17 @@ module Mutineer
       coverage_map, worker_count = prepare_run(config, abs_tests, worker_count)
 
       results =
-        if worker_count > 1
-          run_parallel(jobs, worker_count, config, abs_tests, coverage_map, source_map)
-        else
-          run_serial(jobs, config, abs_tests, coverage_map, source_map)
+        begin
+          if worker_count > 1
+            run_parallel(jobs, worker_count, config, abs_tests, coverage_map, source_map)
+          else
+            run_serial(jobs, config, abs_tests, coverage_map, source_map)
+          end
+        ensure
+          # A daemon that crashes mid-mutant orphans its child, and the respawned
+          # daemon sweeps before that child dies (#250). Sweep again once every
+          # daemon is gone, as the in-process path does.
+          JobPlan.sweep_orphans(JobPlan.source_dirs(config), DAEMON_TEMP_GLOB)
         end
 
       [AggregateResult.new(results + ignored_results), source_map, extras]

@@ -295,18 +295,7 @@ class DaemonBackendContractTest < Minitest::Test
       FileUtils.mkdir_p(File.join(root, "app"))
       source = File.join(root, "app/order.rb")
       File.binwrite(source, SOURCE)
-      # Pid 1 is alive (launchd or init). A live pid is left in place, so the
-      # orphan uses a pid no process owns.
-      dead_pid = (100_000..100_500).find do |candidate|
-        Process.kill(0, candidate)
-        false
-      rescue Errno::ESRCH
-        true
-      rescue Errno::EPERM
-        false
-      end
-      flunk "no unused pid" unless dead_pid
-      orphan = File.join(root, "app/mutineer_daemon20260101-#{dead_pid}-abcdef.rb")
+      orphan = File.join(root, "app/mutineer_daemon20260101-#{unused_pid}-abcdef.rb")
       File.binwrite(orphan, "class Order; end\n")
 
       config = Mutineer::Config.new(sources: [source], tests: [], project_root: root,
@@ -317,6 +306,28 @@ class DaemonBackendContractTest < Minitest::Test
       end
 
       refute_path_exists orphan, "a zero-job run must still clear orphaned daemon temps"
+    end
+  end
+
+  # #250: a daemon that crashes mid-mutant orphans its child, and the respawned
+  # daemon's boot sweep runs before that child dies. The run sweeps once more at
+  # the end, so the file cannot outlive it and break the app's next boot.
+  def test_a_run_sweeps_daemon_temps_orphaned_during_the_run
+    with_jobs do |jobs, config, source_map|
+      orphan = File.join(config.project_root, "app/mutineer_daemon20260101-#{unused_pid}-abcdef.rb")
+      run_serial = lambda do |*|
+        File.binwrite(orphan, "class Order; end\n")
+        []
+      end
+      Mutineer::JobPlan.stub(:collect_jobs, [jobs, [], source_map, {}]) do
+        Mutineer::DaemonBackend.stub(:prepare_run, [nil, 1]) do
+          Mutineer::DaemonBackend.stub(:run_serial, run_serial) do
+            Mutineer::DaemonBackend.execute(config, [])
+          end
+        end
+      end
+
+      refute_path_exists orphan, "a run must clear a daemon temp orphaned during it"
     end
   end
 
@@ -433,5 +444,21 @@ class DaemonBackendContractTest < Minitest::Test
                       "the healthy worker kept draining the queue after the daemon gave up " \
                       "(#{healthy.seen.size} of #{many.size} jobs)"
     end
+  end
+
+  private
+
+  # A pid no process owns. Pid 1 is alive (launchd or init), and a sweep leaves
+  # a live pid's file in place.
+  def unused_pid
+    pid = (100_000..100_500).find do |candidate|
+      Process.kill(0, candidate)
+      false
+    rescue Errno::ESRCH
+      true
+    rescue Errno::EPERM
+      false
+    end
+    pid || flunk("no unused pid")
   end
 end

@@ -155,7 +155,13 @@ class DaemonClientTest < Minitest::Test
         # Includes the respawn's Rails boot; without the fix this is ~60s.
         assert_operator elapsed, :<, 30, "the orphaned child must not hold the protocol pipe"
       ensure
-        Process.kill(:KILL, File.read(marker).to_i) rescue nil # rubocop:disable Style/RescueModifier
+        child = File.read(marker).to_i if File.size?(marker)
+        if child
+          Process.kill(:KILL, child) rescue nil # rubocop:disable Style/RescueModifier
+          # Killed inside `load`, the child leaves its mutant file in app/models,
+          # and a later Rails boot fails on the name (#250).
+          Dir.glob(File.join(APP, "app/models", "mutineer_daemon*-#{child}-*.rb")).each { |f| File.unlink(f) }
+        end
       end
     end
   end

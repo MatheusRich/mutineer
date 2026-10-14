@@ -83,6 +83,11 @@ All notable changes to this project are documented here. The format is based on
 - **A Rails daemon boots again while a mutant file is still open.**
   The file stays when another process holds it. The next boot skips
   that file name instead of stopping.
+- **A daemon crash no longer leaves a mutant file in your source folder
+  (#250).** When a daemon dies during a mutant, its child dies a moment
+  later. The new daemon cleaned up before that, so the child's file stayed.
+  The next Rails boot then failed on the file name. Each daemon run now
+  cleans up again when it ends.
 - **SimpleCov in a test helper no longer breaks every mutant under
   `--rails` or `--boot` (#248).** After the coverage map is built, mutineer
   pauses Ruby's coverage (#228). SimpleCov saw the paused coverage as off and
