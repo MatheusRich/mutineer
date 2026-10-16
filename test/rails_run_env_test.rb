@@ -11,7 +11,9 @@ class RailsRunEnvTest < Minitest::Test
   SRC = File.join(BOOT, "widget.rb")
   STRONG = File.join(BOOT, "widget_strong_test.rb")
 
-  def test_daemon_run_replaces_a_user_value_once_and_restores_it
+  # The daemon branch of Runner.execute with no mutants: no daemon boots.
+  # daemon_client_env_test.rb covers the daemon child's own environment.
+  def test_daemon_config_replaces_a_user_value_once_and_restores_it
     with_parallel_workers("8") do
       Dir.mktmpdir("mutineer-fork-hygiene") do |dir|
         source = File.join(dir, "empty.rb")
@@ -25,6 +27,33 @@ class RailsRunEnvTest < Minitest::Test
         assert_equal 1, err.scan('PARALLEL_WORKERS was "8"').size
         assert_equal "8", ENV["PARALLEL_WORKERS"]
       end
+    end
+  end
+
+  def test_parallel_workers_one_prints_no_replacement_line
+    with_parallel_workers("1") do
+      Dir.mktmpdir("mutineer-fork-hygiene") do |dir|
+        source = File.join(dir, "empty.rb")
+        File.write(source, "# no mutants\n")
+        _out, err = capture_io do
+          Mutineer::Runner.execute(Mutineer::Config.new(sources: [source], tests: [], project_root: dir))
+        end
+        refute_match(/PARALLEL_WORKERS was/, err)
+        assert_equal "1", ENV["PARALLEL_WORKERS"]
+      end
+    end
+  end
+
+  def test_a_run_that_raises_still_restores_the_user_value
+    with_parallel_workers("8") do
+      capture_io do
+        assert_raises(ArgumentError) do
+          Mutineer::Runner.execute(Mutineer::Config.new(
+            sources: [SRC], tests: [STRONG], project_root: BOOT, operators: ["no_such_operator"]
+          ))
+        end
+      end
+      assert_equal "8", ENV["PARALLEL_WORKERS"]
     end
   end
 

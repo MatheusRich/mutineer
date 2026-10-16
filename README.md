@@ -250,14 +250,18 @@ Spring does not start for that command.
 The `--daemon` path loads `config/environment` itself, so Spring does not start there either.
 A wrapper that sets `DISABLE_SPRING` again wins, same as `PARALLEL_WORKERS`.
 
-Bootsnap's cache is safe to share across these processes.
-The cache key is the file content, not the process.
+Bootsnap checks its compile cache by file path, size, and modification time in whole seconds.
+It does not compare the file content.
+The in-process and `--daemon` paths load each mutant from a new file, so the cache cannot mix them up.
+`--test-command` rewrites the source file in place.
+Two mutants of the same size, written in the same second, can then load the first one's cached code.
+To rule that out, set `DISABLE_BOOTSNAP_COMPILE_CACHE=1` on the Mutineer command.
 Clear a stale cache by deleting `tmp/cache/bootsnap` (the path your `config/boot.rb` sets).
 
-Redis clients reconnect after a fork.
-Rails registers that reconnect with `ActiveSupport::ForkTracker`.
-`redis-client` does the same.
+`redis-client` (which `redis` 5 uses) opens a new connection after a fork on its own.
 You do not set anything in Mutineer for this.
+`redis` 4.x raises `Redis::InheritedError` instead.
+Open that connection after boot, or reconnect it in an after-fork hook.
 
 ### Faster, parallel-safe Rails (the `--daemon` backend)
 
@@ -324,7 +328,9 @@ RAILS_ENV=test mutineer run app/models/order.rb \
   prepends rbenv/asdf shims when a pin was scrubbed. Do not rely on
   `RBENV_VERSION=…` on the Mutineer command for the suite; use `.ruby-version`
   or a wrapper. Don't put `KEY=val` prefixes *inside* `--test-command` (no shell;
-  that would be treated as the program name).
+  that would be treated as the program name). Mutineer also sets
+  `PARALLEL_WORKERS=1` and `DISABLE_SPRING=1` in the child and replaces a value
+  you set (see [Rails parallel tests, Spring, Bootsnap, and Redis](#rails-parallel-tests-spring-bootsnap-and-redis)).
 
 #### Under a version manager (rbenv / asdf / chruby)
 

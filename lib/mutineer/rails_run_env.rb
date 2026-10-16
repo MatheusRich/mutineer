@@ -6,8 +6,8 @@ module Mutineer
   # Rails reads +PARALLEL_WORKERS+ inside +parallelize+ and uses it instead of
   # the +workers:+ argument. A value of 1 keeps that run in one process.
   # +--test-command+ also sets +DISABLE_SPRING+ so the Spring preloader does
-  # not start. The caller prints the replacement line once, then puts the
-  # process value back when the run ends.
+  # not start. {pin_process!} prints the replacement line once. The caller
+  # puts the process value back with {restore_process!} when the run ends.
   module RailsRunEnv
     # Value of +PARALLEL_WORKERS+ that keeps Rails test workers off.
     PARALLEL_WORKERS = "1"

@@ -26,6 +26,7 @@ module Mutineer
   # Child environment: bundler/gem env injected by Mutineer's Ruby is stripped, and
   # version-manager concrete version bins (e.g. `~/.rbenv/versions/3.4.9/bin`) are
   # removed from PATH so shims / `.ruby-version` can select the app's Ruby (#32).
+  # PARALLEL_WORKERS and DISABLE_SPRING are set to 1 ({RailsRunEnv}).
   module ExternalBackend
     # Generous ceiling for the one-off smoke/calibration run (a cold app boot plus
     # the full suite). The per-mutant timeout is derived from how long this took.
