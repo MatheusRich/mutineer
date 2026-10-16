@@ -44,7 +44,7 @@ module Mutineer
     #   source map, and the {JobPlan.collect_jobs} extras.
     def self.execute(config, operator_classes)
       jobs, ignored_results, source_map, extras = JobPlan.collect_jobs(config, operator_classes)
-      jobs = JobPlan.filter_since(jobs, source_map, config) if config.since
+      jobs, ignored_results, extras[:unscoped_mutants] = JobPlan.scope_since(jobs, ignored_results, source_map, config)
       abs_tests = config.tests.map { |t| File.expand_path(t, config.project_root) }
 
       # Nothing to mutate (`--since` matched no changed line, or every mutant is
@@ -54,7 +54,8 @@ module Mutineer
       if jobs.empty?
         # The daemon sweeps orphaned temps at boot and nothing boots here, so sweep
         # tool-side. A file a hard-killed run left in app/models breaks the app's own
-        # Zeitwerk boot, not just Mutineer's next run.
+        # Zeitwerk boot, not just Mutineer's next run. A file a live run still owns
+        # is left in place.
         JobPlan.sweep_orphans(JobPlan.source_dirs(config), DAEMON_TEMP_GLOB)
         return [AggregateResult.new(ignored_results), source_map, extras]
       end

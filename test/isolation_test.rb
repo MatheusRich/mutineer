@@ -55,6 +55,33 @@ class IsolationTest < Minitest::Test
     assert_empty out, "test output should be silenced"
   end
 
+  # #248: the parent suspends Coverage after the map (#228). A test helper that
+  # starts Coverage when it is off, as SimpleCov does, must not raise in the
+  # mutant child. A child that starts nothing keeps Coverage suspended, so it
+  # does not pay to stop it. The outer fork keeps the suspend out of this process.
+  def test_a_helper_can_start_coverage_in_a_child_of_a_suspended_parent
+    require "coverage"
+    outer = Mutineer::Isolation.run do
+      Coverage.start(lines: true) if Coverage.state == :idle
+      Coverage.resume if Coverage.state == :suspended
+      Coverage.suspend
+      untouched = Mutineer::Isolation.run { Coverage.state == :suspended ? 0 : 1 }
+      # SimpleCov passes its options as a positional hash.
+      started = Mutineer::Isolation.run do
+        Coverage.start({ lines: true }) unless Coverage.running?
+        Coverage.running? ? 0 : 1
+      end
+      set_up = Mutineer::Isolation.run do
+        Coverage.setup(lines: true)
+        Coverage.resume
+        Coverage.running? ? 0 : 1
+      end
+      parent_still_suspended = Coverage.state == :suspended
+      [untouched, started, set_up].all?(&:survived?) && parent_still_suspended ? 0 : 1
+    end
+    assert_predicate outer, :survived?
+  end
+
   # The parent may hold a StringIO in $stdout (here: capture_io). The child must
   # still give the test a real IO, or `$stdout.reopen` raises TypeError.
   def test_child_stdout_is_a_real_io_when_parent_stdout_is_a_stringio

@@ -17,7 +17,7 @@ require "mutineer/daemon_backend"
 # contract moves.
 class DaemonBackendContractTest < Minitest::Test
   # The JobPlan methods DaemonBackend calls across the module boundary.
-  SHARED = %i[collect_jobs filter_since coverage_selection load_verdict test_load_roots source_dirs
+  SHARED = %i[collect_jobs filter_since scope_since coverage_selection load_verdict test_load_roots source_dirs
               sweep_orphans abort_if_unclean!].freeze
 
   # Cheapest possible tripwire: privatising or renaming any of them breaks the
@@ -295,7 +295,18 @@ class DaemonBackendContractTest < Minitest::Test
       FileUtils.mkdir_p(File.join(root, "app"))
       source = File.join(root, "app/order.rb")
       File.binwrite(source, SOURCE)
-      orphan = File.join(root, "app/mutineer_daemon20260101-1-abcdef.rb")
+      # Pid 1 is alive (launchd or init). A live pid is left in place, so the
+      # orphan uses a pid no process owns.
+      dead_pid = (100_000..100_500).find do |candidate|
+        Process.kill(0, candidate)
+        false
+      rescue Errno::ESRCH
+        true
+      rescue Errno::EPERM
+        false
+      end
+      flunk "no unused pid" unless dead_pid
+      orphan = File.join(root, "app/mutineer_daemon20260101-#{dead_pid}-abcdef.rb")
       File.binwrite(orphan, "class Order; end\n")
 
       config = Mutineer::Config.new(sources: [source], tests: [], project_root: root,

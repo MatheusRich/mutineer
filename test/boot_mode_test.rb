@@ -76,7 +76,8 @@ class BootModeTest < Minitest::Test
 
   # #228: Coverage runs while the map is built, then is suspended, so no mutant
   # fork pays for it. The second run resumes it for a cache hit, which
-  # suspends it again.
+  # suspends it again. A mutant whose tests never start Coverage leaves it
+  # suspended (#248 stops it only when a helper starts it).
   def test_coverage_is_suspended_in_mutants_after_the_map_is_built
     # Another test in this process may have left Coverage running, which reads
     # as a host's Coverage (see the test below).

@@ -4,6 +4,7 @@ require "tempfile"
 require_relative "result"
 require_relative "parser"
 require_relative "child_stdout"
+require_relative "child_coverage"
 require_relative "kill_channel"
 
 module Mutineer
@@ -56,6 +57,7 @@ module Mutineer
         code = 0
         begin
           ChildStdout.silence
+          ChildCoverage.allow_start
           # A block that takes no channel (a zero-arity lambda) still runs.
           result = channel ? yield(wr) : yield
           code = result.is_a?(Integer) ? result : 0
