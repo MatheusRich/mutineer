@@ -14,7 +14,7 @@ All notable changes to this project are documented here. The format is based on
   (`schema_version` 1.8) and the HTML report show it. A mapping with no
   `id`, or with an unknown key, warns. Mutineer 1.7 is the first version
   that reads a mapping. An older version matches no mutant to a mapping
-  and does not warn, so that mutant stays a survivor.
+  and does not warn, so the mutant it names is not ignored.
   `mutineer migrate` rewrites the old id inside a mapping and keeps its
   reason.
 - **`mutineer triage`.** It prints `ignore:` mapping entries for survivors
