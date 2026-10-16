@@ -30,6 +30,7 @@ All notable changes to this project are documented here. The format is based on
   `<base>-mutineer-<N>` on `mysql2` or `trilogy`. Mutineer creates the
   database, loads `schema.rb` or `structure.sql`, and copies rows once at
   the start. A second run cannot drop a database another live run holds.
+  That work uses the TLS and timeout settings from the database config.
   MariaDB is not tested. MySQL 5.7 is not supported. The worker databases
   stay after the run.
 - **`mutineer migrate`.** It rewrites old-format ids in `.mutineer.yml`

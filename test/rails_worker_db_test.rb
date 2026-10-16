@@ -127,6 +127,17 @@ class RailsWorkerDbTest < Minitest::Test
     end
   end
 
+  def test_mysql_recreate_refuses_a_name_outside_the_worker_pattern
+    conn = Object.new
+    conn.define_singleton_method(:query) { |*| flunk "must not touch a database outside the worker pattern" }
+    ["analytics", "myapp_test", "mysql", "other_app-mutineer-0"].each do |name|
+      error = assert_raises(RuntimeError) do
+        Mutineer::RailsWorkerDb.recreate_mysql_database(conn, name, "myapp_test")
+      end
+      assert_match(/\Arefusing to drop #{Regexp.escape(name)}\z/, error.message)
+    end
+  end
+
   def test_recreate_drops_only_the_canonical_worker_name
     calls = []
     conn = Object.new
@@ -275,6 +286,23 @@ class RailsWorkerDbTest < Minitest::Test
     db.instance_variable_set(:@lock_connection, nil)
   end
 
+  # A server that requires TLS refuses a maintenance session without it.
+  def test_mysql_client_options_keep_tls_and_timeout_keys
+    opts = Mutineer::RailsWorkerDb.mysql_client_options(
+      adapter: "mysql2", host: "db", database: "app_test", pool: 5, variables: { sql_mode: "" },
+      ssl_mode: "verify_identity", sslca: "/ca.pem", sslcert: "/c.pem", sslkey: "/k.pem", connect_timeout: 5
+    )
+    assert_equal "verify_identity", opts[:ssl_mode]
+    assert_equal ["/ca.pem", "/c.pem", "/k.pem"], opts.values_at(:sslca, :sslcert, :sslkey)
+    assert_equal 5, opts[:connect_timeout]
+    refute opts.key?(:database)
+    refute opts.key?(:pool)
+    refute opts.key?(:variables)
+
+    trilogy = Mutineer::RailsWorkerDb.mysql_client_options(ssl: true, ssl_ca: "/ca.pem", tls_min_version: 3)
+    assert_equal [true, "/ca.pem", 3], trilogy.values_at(:ssl, :ssl_ca, :tls_min_version)
+  end
+
   def test_mysql_client_options_use_a_custom_socket_instead_of_host
     opts = Mutineer::RailsWorkerDb.mysql_client_options(
       adapter: "trilogy", host: "127.0.0.1", port: 3306, socket: "/run/app/mysql.sock",
@@ -411,6 +439,24 @@ class RailsWorkerDbTest < Minitest::Test
     Mutineer::RailsWorkerDb.forget_lock_connection_after_fork!
     assert_nil Mutineer::RailsWorkerDb.instance_variable_get(:@lock_connection)
     assert_empty Mutineer::RailsWorkerDb.instance_variable_get(:@mysql_held_locks)
+  end
+
+  # A freed client sends QUIT (mysql2) or Terminate (pg) on the shared socket,
+  # which ends the parent's lock session. Each client is detached first.
+  def test_a_fork_child_detaches_each_client_before_forgetting_it
+    mysql2 = Struct.new(:automatic_close).new(true)
+    trilogy = Class.new { attr_reader :discarded; def discard! = (@discarded = true) }.new
+    socket = Class.new { attr_reader :target; def reopen(io) = (@target = io) }.new
+    pg = Struct.new(:socket_io).new(socket)
+
+    [mysql2, trilogy, pg].each do |conn|
+      Mutineer::RailsWorkerDb.instance_variable_set(:@lock_connection, conn)
+      Mutineer::RailsWorkerDb.forget_lock_connection_after_fork!
+    end
+
+    assert_equal false, mysql2.automatic_close
+    assert trilogy.discarded
+    assert_equal IO::NULL, socket.target
   end
 
   def test_trilogy_row_copy_keeps_foreign_keys_and_auto_increment

@@ -114,7 +114,7 @@ jobs:
       <p>Drop <code>--since</code> and <code>--baseline</code> for a report-only job. Add <code>--threshold 90</code> when a folder is ready for a hard gate.</p>
 
       <h2 id="daemon">Daemon</h2>
-      <p><code>--daemon</code> gives each worker its own test database. SQLite test databases are supported. Postgres and other adapters are not supported in this version. On those adapters, <code>--daemon</code> scores every mutant as an error. Leave <code>daemon</code> commented in <code>.mutineer.yml</code> until this matrix says it fits. Run without the daemon to stay serial on other adapters.</p>
+      <p><code>--daemon</code> gives each worker its own test database. It works with Minitest on a SQLite file, PostgreSQL, or MySQL 8 (<code>mysql2</code> or <code>trilogy</code>). MariaDB is not tested. MySQL 5.7 is not supported. An app with more than one database runs one worker. On another adapter, <code>--daemon</code> scores every mutant as an error. The <a href="https://github.com/davidteren/mutineer#is-it-production-ready">support matrix</a> lists each case. Leave <code>daemon</code> commented in <code>.mutineer.yml</code> until that matrix says your app fits. Run without the daemon to stay serial on other adapters.</p>
     </article>
   </div>
 </main>

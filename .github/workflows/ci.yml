@@ -128,8 +128,13 @@ jobs:
         run: bundle exec rake test:daemon
 
   rails-mysql:
-    name: rails daemon mysql 8 (ruby 3.4)
+    name: rails daemon mysql 8 (${{ matrix.adapter }}, ruby 3.4)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The docs promise both clients, so both run against a real server.
+        adapter: [mysql2, trilogy]
     services:
       mysql:
         image: mysql:8.0
@@ -146,6 +151,7 @@ jobs:
           --health-retries 10
     env:
       DB: mysql
+      MYSQL_ADAPTER: ${{ matrix.adapter }}
       BUNDLE_WITH: mysql
       MYSQL_HOST: 127.0.0.1
       MYSQL_PORT: "3306"

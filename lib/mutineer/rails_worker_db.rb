@@ -41,6 +41,16 @@ module Mutineer
     # Actions information_schema may report for a foreign key. Anything else is
     # rejected so a bad row cannot change the ALTER TABLE statement.
     MYSQL_REFERENTIAL_ACTIONS = ["CASCADE", "SET NULL", "SET DEFAULT", "RESTRICT", "NO ACTION"].freeze
+    # TLS and timeout keys from the app's MySQL config that reach the
+    # maintenance client unchanged. ActiveRecord passes them to the client the
+    # same way. The first group is mysql2's, the second trilogy's. Each client
+    # ignores the other's keys.
+    MYSQL_CLIENT_KEYS = %i[
+      connect_timeout read_timeout write_timeout
+      ssl_mode sslkey sslcert sslca sslcapath sslcipher sslverify get_server_public_key
+      ssl ssl_ca ssl_capath ssl_cert ssl_key ssl_cipher ssl_crl ssl_crlpath
+      tls_ciphersuites tls_min_version tls_max_version
+    ].freeze
     # Infix that keeps a worker database off Rails' own `<base>-<n>` names.
     WORKER_NAME_MARK = "-mutineer-"
     # Database we connect to while the test database is a template. Advisory
@@ -206,8 +216,8 @@ module Mutineer
     end
 
     # Build the AR connection config for one worker from the app's current
-    # test config. SQLite and Postgres get a per-worker database name. Anything
-    # else raises.
+    # test config. SQLite, Postgres, and MySQL (mysql2 or trilogy) get a
+    # per-worker database name. Anything else raises.
     #
     # @param worker [Integer] the worker slot index.
     # @return [Hash] a symbol-keyed AR configuration hash for the worker database.
@@ -532,7 +542,7 @@ module Mutineer
       rescue StandardError => e
         unlock(conn, base)
         conn.close
-        raise e.message.start_with?("could not provision", "another Mutineer run", "refusing to drop") ? e : provision_failure(base, base, e.message)
+        raise provision_wrapped?(e) ? e : provision_failure(base, base, e.message)
       end
 
       unlock(conn, base)
@@ -736,10 +746,9 @@ module Mutineer
     end
 
     # The child inherited the parent's lock session. Drop the Ruby wrapper
-    # without sending a disconnect, so the parent's advisory lock stays held.
-    # The child's file descriptor closes when the child exits. That does not
-    # close the parent's copy of the same socket. Clearing the held-name list
-    # stops the child from sending RELEASE_LOCK on that shared session.
+    # without sending a disconnect, so the parent's locks stay held.
+    # Clearing the held-name list stops the child from sending RELEASE_LOCK
+    # on that shared session.
     #
     # @return [void]
     def self.forget_lock_connection_after_fork!
@@ -748,7 +757,26 @@ module Mutineer
       @lock_connection = nil
       return unless conn
 
+      detach_inherited_connection(conn)
       ObjectSpace.undefine_finalizer(conn)
+    end
+
+    # Make a fork child's copy of the lock connection safe to free. The
+    # client's free function runs at the child's next GC. Left as it is, that
+    # sends QUIT (mysql2) or Terminate (pg) on the socket the parent shares,
+    # so the server ends the parent's session and every lock it holds.
+    # These are the steps ActiveRecord's adapters take in `discard!`.
+    #
+    # @param conn [Mysql2::Client, Trilogy, PG::Connection]
+    # @return [void]
+    def self.detach_inherited_connection(conn)
+      if conn.respond_to?(:automatic_close=)
+        conn.automatic_close = false # mysql2: GC drops only this process's fd
+      elsif conn.respond_to?(:discard!)
+        conn.discard! # trilogy: closes only this process's fd
+      elsif conn.respond_to?(:socket_io)
+        conn.socket_io.reopen(IO::NULL) # pg: Terminate goes to /dev/null
+      end
     end
 
     # Quote a database name for a Postgres identifier. `CREATE DATABASE` cannot
@@ -802,10 +830,8 @@ module Mutineer
         disconnect_app!
         count.times do |slot|
           name = mysql_worker_database(base, slot)
-          raise "refusing to drop #{name}" unless owned_database?(base, name, slots: count, limit: MYSQL_NAME_LIMIT)
-
           begin
-            recreate_mysql_database(conn, name)
+            recreate_mysql_database(conn, name, base)
             load_mysql_schema(hash, name, base)
             copy_mysql_rows(conn, base, name)
           rescue StandardError => e
@@ -855,7 +881,12 @@ module Mutineer
       if adapter == "trilogy"
         raise "could not provision #{base}: the app's trilogy client is not loaded" unless defined?(Trilogy)
 
-        Trilogy.new(opts)
+        # Rails' adapter turns a `ssl_mode` name into the constant trilogy wants.
+        if defined?(ActiveRecord::ConnectionAdapters::TrilogyAdapter)
+          ActiveRecord::ConnectionAdapters::TrilogyAdapter.new_client(opts)
+        else
+          Trilogy.new(opts)
+        end
       else
         raise "could not provision #{base}: the app's mysql2 client is not loaded" unless defined?(Mysql2::Client)
 
@@ -870,7 +901,8 @@ module Mutineer
     # Connection options shared by mysql2 and trilogy. The database key is left
     # out so the session is not tied to the test database. A socket wins over
     # host: trilogy ignores `socket` when `host` is set, and would then use its
-    # compiled-in default instead of the app's socket.
+    # compiled-in default instead of the app's socket. TLS and timeout keys in
+    # {MYSQL_CLIENT_KEYS} are kept.
     #
     # @param config_hash [Hash]
     # @return [Hash]
@@ -889,6 +921,7 @@ module Mutineer
       opts[:username] = user.to_s if user && !user.to_s.empty?
       password = config_hash[:password]
       opts[:password] = password.to_s unless password.nil?
+      MYSQL_CLIENT_KEYS.each { |key| opts[key] = config_hash[key] unless config_hash[key].nil? }
       # `:encoding` is an ActiveRecord key. mysql2 and trilogy do not share it.
       # Row copy runs in the server, so the client charset does not change it.
       opts
@@ -1017,12 +1050,16 @@ module Mutineer
       mysql_exec(conn, "SELECT RELEASE_LOCK(#{mysql_quote_string(conn, name)})")
     end
 
-    # Drop and create `name`. The caller has already checked {owned_database?}.
+    # Drop and create `name`. Refuses any name that is not one of `base`'s
+    # worker database names, so a name bug can never drop the test database.
     #
     # @param conn [Mysql2::Client, Trilogy]
     # @param name [String]
+    # @param base [String] the test database name.
     # @return [void]
-    def self.recreate_mysql_database(conn, name)
+    def self.recreate_mysql_database(conn, name, base)
+      raise "refusing to drop #{name}" unless owned_database?(base, name, slots: MYSQL_LOCK_SLOTS, limit: MYSQL_NAME_LIMIT)
+
       quoted = quote_mysql_ident(name)
       mysql_exec(conn, "DROP DATABASE IF EXISTS #{quoted}")
       mysql_exec(conn, "CREATE DATABASE #{quoted} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
@@ -1112,6 +1149,13 @@ module Mutineer
     # @return [void]
     def self.copy_mysql_rows(conn, base, dest)
       mysql_exec(conn, "SET FOREIGN_KEY_CHECKS = 0")
+      # MySQL 8 caches information_schema.TABLES values, AUTO_INCREMENT among
+      # them, for a day by default. The copy reads them live.
+      begin
+        mysql_exec(conn, "SET SESSION information_schema_stats_expiry = 0")
+      rescue StandardError
+        nil # MariaDB has no such cache or variable.
+      end
       tables = mysql_rows(conn, <<~SQL)
         SELECT TABLE_NAME AS table_name
         FROM information_schema.TABLES
