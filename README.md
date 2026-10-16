@@ -362,7 +362,7 @@ Some mutants are equivalent (behaviour-identical) and survive forever — keepin
 file off 100%. Suppress them so the score and `--threshold` gate stay meaningful:
 
 - **Inline:** `some_line # mutineer:disable-line` (or scope it: `# mutineer:disable-line comparison`). Put a reason after `--`: `# mutineer:disable-line comparison -- the test checks only 20`. The reason is stored on the ignored mutant and shown in the JSON report and the HTML report. A marker with no reason stores none.
-- **Config:** a `.mutineer.yml` `ignore:` list. A bare mutant id still works. A mapping is `id` plus an optional `reason`. Mutineer 1.9 is the first version that reads a mapping. Older versions do not understand one. The reason shows in the same reports as an inline reason. Each survivor's `id` is printed in the JSON report.
+- **Config:** a `.mutineer.yml` `ignore:` list. A bare mutant id still works. A mapping is `id` plus an optional `reason`. Mutineer 1.7 is the first version that reads a mapping. Older versions do not understand one. The reason shows in the same reports as an inline reason. Each survivor's `id` is printed in the JSON report.
 
 `mutineer triage REPORT.json --reason TEXT --all` prints one mapping entry per survivor. `--id ID` prints one entry. Repeat `--id` for several. The command does not edit files. Paste the lines under `ignore:`.
 

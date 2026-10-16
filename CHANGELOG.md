@@ -12,7 +12,7 @@ All notable changes to this project are documented here. The format is based on
   `# mutineer:disable-line`, and a `.mutineer.yml` `ignore:` mapping
   (`id` plus `reason`), is stored on the ignored mutant. The JSON report
   (`schema_version` 1.8) and the HTML report show it. A mapping with no
-  `id`, or with an unknown key, warns. Mutineer 1.9 is the first version
+  `id`, or with an unknown key, warns. Mutineer 1.7 is the first version
   that reads a mapping. Older versions do not understand one.
   `mutineer migrate` rewrites the old id inside a mapping and keeps its
   reason.
