@@ -8,30 +8,94 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- **Reasons on ignored mutants.** Text after `--` on
+  `# mutineer:disable-line`, and a `.mutineer.yml` `ignore:` mapping
+  (`id` plus `reason`), is stored on the ignored mutant. The JSON report
+  (`schema_version` 1.8) and the HTML report show it. A mapping with no
+  `id`, or with an unknown key, warns. Mutineer 1.9 is the first version
+  that reads a mapping. Older versions do not understand one.
+  `mutineer migrate` rewrites the old id inside a mapping and keeps its
+  reason.
+- **`mutineer triage`.** It prints `ignore:` mapping entries for survivors
+  in a JSON report. `--reason` is required. Pass `--all` or `--id`. It
+  does not edit files.
+- **Equivalent-skip page.** The docs list every built-in chain-link skip
+  and the endless-range skip, and why each one is equivalent.
 - **Postgres worker databases for `--rails --daemon`.** Each worker gets
   `<base>-mutineer-<N>`, copied from the test database before mutants run.
   A second run cannot drop a database another live run holds. An app with
   more than one database config runs one worker and says so once.
   The worker databases stay after the run.
-
 - **MySQL 8 worker databases for `--rails --daemon`.** Each worker gets
   `<base>-mutineer-<N>` on `mysql2` or `trilogy`. Mutineer creates the
   database, loads `schema.rb` or `structure.sql`, and copies rows once at
   the start. A second run cannot drop a database another live run holds.
   MariaDB is not tested. MySQL 5.7 is not supported. The worker databases
   stay after the run.
-
+- **`mutineer migrate`.** It rewrites old-format ids in `.mutineer.yml`
+  `ignore:` to the current ids. It keeps comments and every other line.
+  One old id that matches several mutants becomes every new id. An id that
+  matches nothing stays, and the command exits 1. A block scalar under
+  `ignore:` is not supported: the command exits 2 and does not change the
+  file. `--dry-run` prints each change and writes nothing. It does not
+  rewrite a baseline. Generate a new baseline with `--format json`. An
+  old-id warning names `mutineer migrate` and says that this becomes an
+  error in Mutineer 2.0. The baseline warning says to generate a new
+  baseline with `--format json`.
+- **`mutineer init`.** It writes a commented `.mutineer.yml` with the default
+  operators. `since` stays commented, so the first run is a full scan.
+  `init --rails` also sets `rails: true` and prints the first run command.
+  An existing file is kept unless you pass `--force`.
+- **Rails rollout guide.** The page walks from one model, to a report-only CI
+  job, to a `--since` and `--baseline` pull request gate, to `--threshold`
+  on chosen folders. It has a GitHub Actions recipe and a GitLab CI recipe.
 - **A production-ready section and a stability contract.** The README opens
   with a support matrix for Ruby, database, framework, and parallelism.
   `STABILITY.md` lists what a release keeps and what 2.0 will change.
   `SECURITY.md`, `CONTRIBUTING.md`, and GitHub issue forms are new.
   The docs home page takes the same section from the README at site build.
+- **`--allow-empty` and `allow_empty:`.** A run with no mutants now warns
+  that Mutineer 2.0 will fail it, unless `--allow-empty` marks it as expected.
+  A `--since` run whose changes hold no mutants does not warn: it says the
+  changes hold nothing to test. A `--since` run with no mutants even before
+  scoping still warns. The exit code does not change in 1.x.
+- **`--no-daemon`.** It beats a `.mutineer.yml` `daemon: true` for one run,
+  like `--no-fail-fast`. A Minitest `--rails` run without a `daemon` value now
+  prints a notice that 2.0 uses `--daemon` by default for `--rails`;
+  `--no-daemon` (or `daemon: false`) keeps the run serial and stops the
+  notice.
+- **"Did you mean" hints.** Unknown names in `--operators`, in
+  `.mutineer.yml` `operators:` and keys, and in `# mutineer:disable-line`
+  markers get the closest valid name. The `.mutineer.yml` warnings also say
+  that 2.0 makes them errors.
+
+### Changed
+
+- **`--test-command` exit codes 126 and 127 are scored `error`, not
+  `killed`.** A wrapper that could not start the suite ran no test. Under
+  `--threshold`, such a run can now score lower or fail the no-verdict limit,
+  where before it passed on false kills.
+- **A run with errored mutants and no `--threshold` says so.** Errors are not
+  in the score, so they do not fail the run; the message says what
+  `--threshold` would enforce.
+- **`--since` also narrows suppressed mutants.** A scoped report lists only
+  `ignored` mutants on changed lines, as `--dry-run --since` already did.
+- **The empty-run message moved from the human report to one stderr warning
+  for every format.** "No mutations generated" is gone. An empty `--since`
+  run prints "nothing to test in the changes since REF" instead.
 
 ### Fixed
 
 - **A Rails daemon boots again while a mutant file is still open.**
   The file stays when another process holds it. The next boot skips
   that file name instead of stopping.
+- **SimpleCov in a test helper no longer breaks every mutant under
+  `--rails` or `--boot` (#248).** After the coverage map is built, mutineer
+  pauses Ruby's coverage (#228). SimpleCov saw the paused coverage as off and
+  tried to start it. Ruby refuses that while coverage is paused, so the test
+  helper raised in every mutant. Now a start in a mutant first stops the
+  paused coverage. A mutant whose tests start nothing keeps it paused and pays
+  nothing. This applies to `--daemon` too.
 
 ## [1.6.0] - 2026-10-08
 
