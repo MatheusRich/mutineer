@@ -73,7 +73,8 @@ A Postgres worker database is copied once, at the start of the run.
 A test that commits rows outside a transaction leaves them in that worker database.
 The next mutant on that worker sees those rows.
 Rails parallel tests have the same ceiling.
-Rails `parallelize` is off in a mutant run.
+
+Mutineer sets `PARALLEL_WORKERS=1`, so a `parallelize` call in `test_helper.rb` starts no Rails workers during a mutant run.
 See [Rails parallel tests, Spring, Bootsnap, and Redis](https://github.com/davidteren/mutineer#rails-parallel-tests-spring-bootsnap-and-redis).
 
 <!-- /contract:support-matrix -->
@@ -238,8 +239,9 @@ Rails then runs each mutant's tests in one process.
 Your `parallelize(workers:)` call stays in `test_helper.rb`.
 It does not start Rails workers during a mutant run.
 If you already set `PARALLEL_WORKERS` to another value, Mutineer replaces it and prints one line.
-A wrapper script that sets `PARALLEL_WORKERS` again wins over Mutineer.
-That wrapper runs inside `--test-command`.
+With `--test-command`, a script your command runs can set `PARALLEL_WORKERS` again.
+Its value wins, and the Rails workers start again.
+Remove that line from the script, or write `PARALLEL_WORKERS=${PARALLEL_WORKERS:-4}` so it keeps the 1 Mutineer passes.
 
 Mutineer does not run your `parallelize_setup` hooks.
 Rails registers its own database hook in that same list.
@@ -256,7 +258,8 @@ The in-process and `--daemon` paths load each mutant from a new file, so the cac
 `--test-command` rewrites the source file in place.
 Two mutants of the same size, written in the same second, can then load the first one's cached code.
 To rule that out, set `DISABLE_BOOTSNAP_COMPILE_CACHE=1` on the Mutineer command.
-Clear a stale cache by deleting `tmp/cache/bootsnap` (the path your `config/boot.rb` sets).
+Bootsnap keeps its cache in `tmp/cache/bootsnap`, or under `$BOOTSNAP_CACHE_DIR` when that is set.
+If a run uses code that no longer matches your files, delete that folder and run again.
 
 `redis-client` (which `redis` 5 uses) opens a new connection after a fork on its own.
 You do not set anything in Mutineer for this.

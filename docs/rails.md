@@ -89,6 +89,11 @@ mutineer:
 Drop `--since` and `--baseline` for a report-only job.
 Add `--threshold 90` when a folder is ready for a hard gate.
 
+## Parallel tests
+
+Mutineer sets `PARALLEL_WORKERS=1`, so `parallelize` in `test_helper.rb` starts no Rails workers during a mutant run.
+Details: [Rails parallel tests, Spring, Bootsnap, and Redis](https://github.com/davidteren/mutineer#rails-parallel-tests-spring-bootsnap-and-redis).
+
 ## Daemon
 
 `--daemon` gives each worker its own test database.

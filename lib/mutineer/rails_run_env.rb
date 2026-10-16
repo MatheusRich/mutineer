@@ -65,7 +65,9 @@ module Mutineer
     # @param current [String]
     # @return [String]
     def self.replacement_line(current)
-      "[mutineer] PARALLEL_WORKERS was #{current.inspect}; using 1 so each mutant's tests run in one process."
+      "[mutineer] PARALLEL_WORKERS was #{current.inspect}; using 1 so each mutant's tests run in one process. " \
+        "Unset it or set it to 1 to drop this line."
     end
+    private_class_method :replace?, :replacement_line
   end
 end
