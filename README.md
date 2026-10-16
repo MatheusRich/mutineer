@@ -330,7 +330,7 @@ RAILS_ENV=test mutineer run app/models/order.rb \
   or a wrapper. Don't put `KEY=val` prefixes *inside* `--test-command` (no shell;
   that would be treated as the program name). Mutineer also sets
   `PARALLEL_WORKERS=1` and `DISABLE_SPRING=1` in the child and replaces a value
-  you set (see [Rails parallel tests, Spring, Bootsnap, and Redis](#rails-parallel-tests-spring-bootsnap-and-redis)).
+  you set (see [Rails parallel tests, Spring, Bootsnap, and Redis](https://github.com/davidteren/mutineer#rails-parallel-tests-spring-bootsnap-and-redis)).
 
 #### Under a version manager (rbenv / asdf / chruby)
 
