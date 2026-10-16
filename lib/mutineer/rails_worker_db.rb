@@ -31,8 +31,8 @@ module Mutineer
   module RailsWorkerDb
     # Postgres cuts an unquoted identifier at this many bytes.
     POSTGRES_NAME_LIMIT = 63
-    # MySQL cuts a database name at this many bytes. The shortening rule matches
-    # Postgres. A byte limit stays inside the 64-character limit for this name.
+    # MySQL rejects a database name longer than this many bytes. The shortening
+    # rule matches Postgres. A byte limit stays inside the 64-character limit.
     MYSQL_NAME_LIMIT = 64
     # How many worker daemons can hold a lock at once. MySQL GET_LOCK is
     # exclusive, so each daemon takes one name from this pool. A separate guard
@@ -733,7 +733,8 @@ module Mutineer
     end
 
     # Close every connection this process holds through ActiveRecord, so the
-    # test database can be used as a Postgres template.
+    # test database can be used as a Postgres template and a MySQL slot can be
+    # dropped.
     #
     # @return [void]
     def self.disconnect_app!
@@ -842,7 +843,7 @@ module Mutineer
         end
         raise "another Mutineer run is using #{base}" unless downgrade_mysql_lock_to_shared(conn, base)
       rescue StandardError => e
-        release_mysql_lock(conn)
+        release_held_mysql_locks(conn)
         conn.close
         raise e if provision_wrapped?(e)
 
@@ -1001,7 +1002,7 @@ module Mutineer
     #
     # @param conn [Mysql2::Client, Trilogy]
     # @return [void]
-    def self.release_mysql_lock(conn)
+    def self.release_held_mysql_locks(conn)
       Array(@mysql_held_locks).each { |name| mysql_release_lock(conn, name) }
       @mysql_held_locks = []
       nil

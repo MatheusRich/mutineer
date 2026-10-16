@@ -60,6 +60,7 @@ This matrix is for a Rails app on Ruby 3.4 or later.
 `supported` means you can run that cell in parallel.
 `serial only` means the safe run uses one worker.
 `not supported` means `--daemon` cannot run that cell.
+`not tested` means no CI job runs that cell.
 SQLite file means a database file, not `:memory:`.
 Minitest on that file can use `--daemon`.
 RSpec on that file is serial only.
@@ -271,7 +272,9 @@ and leaves them in place when the run ends. Drop one with
 Each MySQL 8 worker uses a database named `<base>-mutineer-<N>` (shortened when that would pass 64 bytes).
 Mutineer creates that database, loads `schema.rb` or `structure.sql`, and copies rows before the workers start.
 It does not copy the database again after an error or a timeout.
-The worker databases stay in place when the run ends.
+The worker databases stay in place when the run ends. The next run drops and rebuilds them.
+The database user needs CREATE and DROP for those names.
+An app on `structure.sql` also needs the `mysql` client on `PATH`.
 Drop one with ``DROP DATABASE `myapp_test-mutineer-0`;`` (MySQL quotes the name with backticks).
 A second run on the same test database stops with `another Mutineer run is using <base>` until the first run ends.
 MySQL runs at most 256 workers.
