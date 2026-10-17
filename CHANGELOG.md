@@ -104,6 +104,15 @@ All notable changes to this project are documented here. The format is based on
   helper raised in every mutant. Now a start in a mutant first stops the
   paused coverage. A mutant whose tests start nothing keeps it paused and pays
   nothing. This applies to `--daemon` too.
+- **A mutant on a later line of a multi-line `&&` or `||` can be killed
+  (#254).** Ruby counts only the first line of a statement. For code that runs
+  only sometimes on a later line, such as the right side of `verified &&` on
+  its own line, Mutineer picked no tests, so the mutant was always
+  `no_coverage`, however good the tests were. Now it runs the tests that ran
+  the statement. A kill counts. When none kills it, it stays `no_coverage`,
+  because the run cannot tell whether those tests reached it. This also
+  applies to a later `when` condition, a branch, and the body of `x if c` on
+  a later line, and to `--daemon`. No survivor is added, so no score drops.
 
 ## [1.6.0] - 2026-10-08
 

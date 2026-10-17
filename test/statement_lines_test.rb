@@ -8,6 +8,21 @@ class StatementLinesTest < Minitest::Test
     Mutineer::StatementLines.for(def_node, source, source.index(snippet))
   end
 
+  # #254: the right side of a multi-line `a && b` runs only sometimes, so it has
+  # no lines, unless the caller asks for the statement's lines anyway.
+  def test_the_right_side_of_a_multi_line_and_has_lines_only_when_asked
+    source = <<~'RUBY'
+      def f(age, verified)
+        verified &&
+          age > 17
+      end
+    RUBY
+    def_node = Mutineer::Parser.parse_string(source).value.statements.body.first
+    offset = source.index("age > 17")
+    assert_empty Mutineer::StatementLines.for(def_node, source, offset)
+    assert_equal [2, 3], Mutineer::StatementLines.for(def_node, source, offset, sometimes: true)
+  end
+
   def test_a_later_entry_of_a_hash_belongs_to_the_hash
     source = <<~'RUBY'
       def f
