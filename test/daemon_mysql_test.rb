@@ -230,6 +230,7 @@ class DaemonMysqlTest < Minitest::Test
   # the same order, sql_mode, and collation. PRECEDES makes the firing order
   # differ from both name order and file order. New sessions start in
   # ANSI_QUOTES, so names read back must still parse in the triggers' modes.
+  # The audit trigger uses the mysqldump form of a Rails structure dump.
   def test_structure_sql_triggers_do_not_fire_during_the_copy
     path = File.join(APP, "db", "structure.sql")
     File.write(path, <<~SQL)
@@ -246,7 +247,11 @@ class DaemonMysqlTest < Minitest::Test
       CREATE TRIGGER trigger_items_label BEFORE INSERT ON trigger_items FOR EACH ROW SET NEW.label = 'from trigger';
       CREATE TRIGGER trigger_items_mark BEFORE INSERT ON trigger_items FOR EACH ROW PRECEDES trigger_items_label SET NEW.label = CONCAT(NEW.label, '!');
       SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION', collation_connection = 'utf8mb4_unicode_ci';
-      CREATE TRIGGER trigger_items_audit AFTER INSERT ON trigger_items FOR EACH ROW INSERT INTO trigger_audits (item_id) VALUES (NEW.id);
+      DELIMITER ;;
+      /*!50003 CREATE*/ /*!50017 DEFINER=CURRENT_USER*/ /*!50003 TRIGGER trigger_items_audit AFTER INSERT ON trigger_items FOR EACH ROW BEGIN
+        INSERT INTO trigger_audits (item_id) VALUES (NEW.id);
+      END */;;
+      DELIMITER ;
     SQL
     script = <<~RUBY
       require "./config/environment"
@@ -280,12 +285,12 @@ class DaemonMysqlTest < Minitest::Test
             puts "slot\#{slot} \#{table}=\#{base_rows} slot=\#{slot_rows} match=\#{base_rows == slot_rows}"
           end
           slot_triggers = triggers.call(name)
-          puts "slot\#{slot} triggers=\#{base_triggers} slot=\#{slot_triggers} match=\#{base_triggers == slot_triggers}"
+          puts "slot\#{slot} triggers=\#{base_triggers.inspect} slot=\#{slot_triggers.inspect} match=\#{base_triggers == slot_triggers}"
         end
       ensure
-        conn.query("SET GLOBAL sql_mode = '\#{conn.escape(global_mode)}'")
         conn.query("DROP TABLE IF EXISTS trigger_items")
         conn.query("DROP TABLE IF EXISTS trigger_audits")
+        conn.query("SET GLOBAL sql_mode = '\#{conn.escape(global_mode)}'")
       end
     RUBY
     out, status = fixture_ruby(script)
@@ -293,7 +298,7 @@ class DaemonMysqlTest < Minitest::Test
     2.times do |slot|
       assert_match(/^slot#{slot} trigger_items=1:base 1,2:base 2 slot=.* match=true$/, out)
       assert_match(/^slot#{slot} trigger_audits=1:1,2:2 slot=.* match=true$/, out)
-      assert_match(/^slot#{slot} triggers=trigger_items_audit:.*trigger_items_label:.*trigger_items_mark:.* match=true$/, out)
+      assert_match(/^slot#{slot} triggers="trigger_items_audit:.*trigger_items_label:.*trigger_items_mark:.* match=true$/, out)
     end
   ensure
     File.delete(path) if path && File.exist?(path)

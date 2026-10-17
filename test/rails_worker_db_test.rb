@@ -541,6 +541,8 @@ class RailsWorkerDbTest < Minitest::Test
     Mutineer::RailsWorkerDb.copy_mysql_rows(conn, "app_test", "app_test-mutineer-0")
     sql = conn.queries.join("\n")
     refute_match(/DROP DATABASE/i, sql)
+    # No triggers: no session changes and no trigger statements.
+    refute_match(/SET NAMES|SHOW CREATE TRIGGER|^USE /, sql)
     assert_includes sql, "CREATE TABLE `app_test-mutineer-0`.`children` LIKE `app_test`.`children`"
     assert_includes sql, "INSERT INTO `app_test-mutineer-0`.`children` (`id`, `parent_id`, `other_id`)"
     refute_includes sql, "`total`"
@@ -558,7 +560,13 @@ class RailsWorkerDbTest < Minitest::Test
     Mutineer::RailsWorkerDb.copy_mysql_rows(conn, "app_test", "app_test-mutineer-0")
     sql = conn.queries
     at = ->(text) { sql.index { |query| query.start_with?(text) } || flunk("no #{text} in #{sql.inspect}") }
+    listing = sql.find { |query| query.include?("information_schema.TRIGGERS") }
+    assert_includes listing, "TRIGGER_SCHEMA = 'app_test-mutineer-0'"
+    assert_includes listing, "ORDER BY EVENT_OBJECT_TABLE, ACTION_TIMING, EVENT_MANIPULATION, ACTION_ORDER"
+    assert_operator at.("SET NAMES utf8mb4"), :<, at.("SHOW CREATE TRIGGER")
     assert_operator at.("SET SESSION sql_mode = ''"), :<, at.("SHOW CREATE TRIGGER")
+    assert_equal ["DROP TRIGGER `app_test-mutineer-0`.`items_audit`", "DROP TRIGGER `app_test-mutineer-0`.`items_label`"],
+                 sql.grep(/\ADROP TRIGGER/)
     assert_operator sql.rindex { |query| query.start_with?("SHOW CREATE TRIGGER") }, :<, at.("DROP TRIGGER")
     assert_operator sql.rindex { |query| query.start_with?("DROP TRIGGER") }, :<, at.("SET SESSION sql_mode = 'STRICT")
     assert_operator at.("SET SESSION sql_mode = 'STRICT"), :<, at.("INSERT INTO")
@@ -585,6 +593,20 @@ class RailsWorkerDbTest < Minitest::Test
     end
     assert_equal "cannot recreate trigger items_audit on app_test-mutineer-0: " \
                  "Access denied; you need the SET_USER_ID privilege", error.message
+  end
+
+  def test_an_unreadable_trigger_stops_the_copy_before_any_drop
+    conn = trigger_conn
+    def conn.rows_for(sql)
+      return [] if sql.start_with?("SHOW CREATE TRIGGER") && sql.include?("`items_label`")
+
+      super
+    end
+    error = assert_raises(RuntimeError) do
+      Mutineer::RailsWorkerDb.copy_mysql_rows(conn, "app_test", "app_test-mutineer-0")
+    end
+    assert_equal "cannot read trigger items_label on app_test-mutineer-0", error.message
+    assert_empty conn.queries.grep(/\ADROP TRIGGER|\AINSERT INTO/)
   end
 
   # One copied table with two schema triggers, each saved in its own sql_mode.
