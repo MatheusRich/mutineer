@@ -870,8 +870,10 @@ module Mutineer
       disconnect_app!
     end
 
-    # Open a session with the app's MySQL client. No default database, so this
-    # session can drop and create slots. The gem does not depend on the client.
+    # Open a session with the app's MySQL client. It starts with no default
+    # database, so it is not tied to the test database while it drops and
+    # creates slots. {recreate_mysql_triggers} later selects a slot. Every
+    # other statement names its database. The gem does not depend on the client.
     #
     # @param config_hash [Hash]
     # @param base [String] test database name, named in the error if this fails.
@@ -1217,6 +1219,11 @@ module Mutineer
     # ACTION_ORDER. MySQL 8's CREATE text has no FOLLOWS or PRECEDES, so
     # creating them in that order keeps their order.
     #
+    # The CREATE text is read as utf8mb4 with an empty sql_mode. mysql2 0.5.6
+    # and older open utf8mb3, which turns a 4-byte character into "?". Under
+    # ANSI_QUOTES, MySQL quotes the names with double quotes, which the
+    # trigger's own sql_mode may not read. Backticks read in every sql_mode.
+    #
     # @param conn [Mysql2::Client, Trilogy]
     # @param dest [String]
     # @return [Array<Hash>] `:sql`, `:sql_mode` and `:collation` for each trigger.
@@ -1227,10 +1234,17 @@ module Mutineer
         WHERE TRIGGER_SCHEMA = #{mysql_quote_string(conn, dest)}
         ORDER BY EVENT_OBJECT_TABLE, ACTION_TIMING, EVENT_MANIPULATION, ACTION_ORDER
       SQL
-      rows.filter_map do |row|
-        name = row["trigger_name"].to_s
-        next if name.empty?
+      return [] if rows.empty?
 
+      sql_mode = mysql_rows(conn, "SELECT @@SESSION.sql_mode AS sql_mode").first["sql_mode"]
+      mysql_exec(conn, "SET NAMES utf8mb4")
+      mysql_exec(conn, "SET SESSION sql_mode = ''")
+      # ponytail: the text comes back as utf8mb4. In a trigger saved with
+      # another client charset, a _binary or _latin1 literal that holds
+      # non-ASCII bytes changes bytes. Replay the raw bytes with the trigger's
+      # character_set_client if that case appears.
+      triggers = rows.map do |row|
+        name = row["trigger_name"].to_s
         qualified = "#{quote_mysql_ident(dest)}.#{quote_mysql_ident(name)}"
         shown = mysql_rows(conn, "SHOW CREATE TRIGGER #{qualified}").first
         raise "cannot read trigger #{name} on #{dest}" unless shown
@@ -1239,6 +1253,8 @@ module Mutineer
         { sql: shown["sql original statement"].to_s, sql_mode: shown["sql_mode"].to_s,
           collation: shown["collation_connection"].to_s }
       end
+      mysql_exec(conn, "SET SESSION sql_mode = #{mysql_quote_string(conn, sql_mode)}")
+      triggers
     end
 
     # Create the triggers {drop_mysql_triggers} dropped. Each one is created

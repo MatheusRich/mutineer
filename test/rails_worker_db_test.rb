@@ -553,6 +553,29 @@ class RailsWorkerDbTest < Minitest::Test
     assert_nil Mutineer::RailsWorkerDb.mysql_auto_increment_sql("app_test-mutineer-0", "children", nil)
   end
 
+  def test_row_copy_drops_triggers_first_and_creates_them_again_last
+    conn = ScriptedMysql.new(
+      tables: [{ "table_name" => "items" }], columns: [{ "column_name" => "id", "extra" => "" }],
+      foreign_keys: [], auto_increment: "3", existing_tables: [{ "table_name" => "items" }],
+      triggers: { "items_audit" => "NO_ENGINE_SUBSTITUTION", "items_label" => "ANSI_QUOTES" }
+    )
+    Mutineer::RailsWorkerDb.copy_mysql_rows(conn, "app_test", "app_test-mutineer-0")
+    sql = conn.queries
+    at = ->(text) { sql.index { |query| query.start_with?(text) } || flunk("no #{text} in #{sql.inspect}") }
+    assert_operator at.("SET SESSION sql_mode = ''"), :<, at.("SHOW CREATE TRIGGER")
+    assert_operator sql.rindex { |query| query.start_with?("DROP TRIGGER") }, :<, at.("SET SESSION sql_mode = 'STRICT")
+    assert_operator at.("SET SESSION sql_mode = 'STRICT"), :<, at.("INSERT INTO")
+    assert_operator at.("ALTER TABLE"), :<, at.("USE `app_test-mutineer-0`")
+    replay = sql.drop(at.("USE `app_test-mutineer-0`") + 1).first(5)
+    assert_equal [
+      "SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION', collation_connection = 'utf8mb4_unicode_ci'",
+      "CREATE TRIGGER `items_audit`",
+      "SET SESSION sql_mode = 'ANSI_QUOTES', collation_connection = 'utf8mb4_unicode_ci'",
+      "CREATE TRIGGER `items_label`",
+      "SET SESSION sql_mode = 'STRICT_TRANS_TABLES', collation_connection = 'utf8mb4_0900_ai_ci'"
+    ], replay
+  end
+
   def test_an_unknown_foreign_key_action_is_rejected
     rows = [{
       "constraint_name" => "fk_bad",
@@ -585,7 +608,7 @@ class RailsWorkerDbTest < Minitest::Test
   class ScriptedMysql
     attr_reader :queries
 
-    def initialize(tables:, columns:, foreign_keys:, auto_increment:, existing_tables: [], existing_keys: [])
+    def initialize(tables:, columns:, foreign_keys:, auto_increment:, existing_tables: [], existing_keys: [], triggers: {})
       @queries = []
       @tables = tables
       @columns = columns
@@ -593,6 +616,7 @@ class RailsWorkerDbTest < Minitest::Test
       @auto_increment = auto_increment
       @existing_tables = existing_tables
       @existing_keys = existing_keys
+      @triggers = triggers
     end
 
     def query(sql)
@@ -605,7 +629,14 @@ class RailsWorkerDbTest < Minitest::Test
     end
 
     def rows_for(sql)
-      if sql.include?("REFERENCED_TABLE_NAME")
+      if sql.include?("information_schema.TRIGGERS")
+        @triggers.keys.map { |name| { "trigger_name" => name } }
+      elsif (name = sql[/\ASHOW CREATE TRIGGER `[^`]+`\.`([^`]+)`/, 1])
+        [{ "sql original statement" => "CREATE TRIGGER `#{name}`", "sql_mode" => @triggers[name],
+           "collation_connection" => "utf8mb4_unicode_ci" }]
+      elsif sql.include?("@@SESSION")
+        [{ "sql_mode" => "STRICT_TRANS_TABLES", "collation" => "utf8mb4_0900_ai_ci" }]
+      elsif sql.include?("REFERENCED_TABLE_NAME")
         @foreign_keys
       elsif sql.include?("CONSTRAINT_TYPE")
         @existing_keys
