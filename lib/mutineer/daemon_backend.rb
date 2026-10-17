@@ -265,22 +265,19 @@ module Mutineer
       queue    = Queue.new
       jobs.each_index { |i| queue << i }
 
-      # Built one at a time so a refused spawn part-way (EMFILE under a high --jobs)
-      # or a Ctrl-C can still quit the daemons already up. Each client joins the
-      # list before it starts, so one interrupted mid-boot is quit too.
+      # Both lists grow one entry at a time, so a refused spawn part-way (EMFILE
+      # under a high --jobs) or a Ctrl-C leaves the ensure below every daemon
+      # already up. Each client joins its list before it starts, so one
+      # interrupted mid-boot is quit too.
       clients = []
-      begin
-        worker_count.times do
-          clients << DaemonClient.new(boot: boot_config(config, abs_tests), app_root: config.project_root)
-          clients.last.start
-        end
-      rescue Exception # rubocop:disable Lint/RescueException
-        clients.each(&:quit)
-        raise
+      threads = []
+      worker_count.times do
+        clients << DaemonClient.new(boot: boot_config(config, abs_tests), app_root: config.project_root)
+        clients.last.start
       end
 
-      threads = clients.each_with_index.map do |client, worker|
-        Thread.new do
+      clients.each_with_index do |client, worker|
+        threads << Thread.new do
           # The abort below is re-raised by join and reported once there; without
           # this Ruby also dumps the thread's backtrace, which the serial path never
           # does. Same fault, same output, whatever --jobs is set to.
@@ -294,10 +291,11 @@ module Mutineer
             results[i] = job_result(jobs[i], i, client, worker, config, coverage_map, abs_tests, source_map)
             progress.tick
           end
-        rescue StandardError
-          # The daemon gave up for good, or a defect escaped. Stop feeding the
-          # other workers rather than letting them score the rest of the run
-          # first; the join below re-raises this and ends the run.
+        rescue Exception # rubocop:disable Lint/RescueException
+          # The daemon gave up for good, or a defect escaped (a SystemStackError
+          # too). Stop feeding the other workers rather than letting them score
+          # the rest of the run first; the join below re-raises this and ends the
+          # run. Thread#kill raises nothing, so the ensure's kill skips this.
           queue.clear
           raise
         ensure
@@ -310,7 +308,12 @@ module Mutineer
       failure = nil
       threads.each do |thread|
         thread.join
-      rescue StandardError => e
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        # A worker's own error ends its thread before join re-raises it. A live
+        # thread means the exception came from outside (a Ctrl-C, a caller's
+        # Timeout), so go straight to the cleanup below.
+        raise if thread.alive?
+
         failure ||= e
       end
       raise failure if failure
@@ -332,6 +335,10 @@ module Mutineer
       rescue Exception # rubocop:disable Lint/RescueException
         nil # the worker's own error, already raised above
       end
+      # Quit every client here too. One may have no thread yet (startup failed
+      # or was interrupted), and a thread killed before its block began never
+      # runs its own ensure. A second quit of a client is a no-op.
+      clients&.each(&:quit)
     end
 
     # Build the payload for one job, run it on the given daemon/worker, and attach

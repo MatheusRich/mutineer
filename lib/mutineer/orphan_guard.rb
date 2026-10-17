@@ -73,7 +73,9 @@ module Mutineer
     def self.zombie?(pid)
       stat = File.read("/proc/#{pid}/stat")
       # The name before the state is in parentheses and may hold ") " itself.
-      stat[stat.rindex(")") + 2] == "Z"
+      # An empty read (the process exited mid-read) has no ")": not a zombie.
+      close = stat.rindex(")")
+      !close.nil? && stat[close + 2] == "Z"
     rescue SystemCallError
       false
     end

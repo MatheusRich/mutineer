@@ -59,10 +59,15 @@ class DaemonClientTest < Minitest::Test
   # A payload that hangs on load is SIGKILLed at the deadline → timeout (fast).
   def test_hung_payload_times_out_and_daemon_recovers
     with_client do |client|
+      temps = -> { Dir.glob(File.join(APP, "app/models", "mutineer_daemon*.rb")) }
+      before = temps.call
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       assert_equal "timeout", run_payload(client, 1, "sleep 999", timeout: 1)
       elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
       assert_operator elapsed, :<, 10, "should kill near the 1s deadline"
+      # #250: the SIGKILLed child skipped its own unlink; a file left in
+      # app/models breaks the app's next Zeitwerk boot.
+      assert_empty temps.call - before, "a timed-out mutant must not leave its file"
 
       # Daemon serves the next request normally — the loop was not wedged.
       assert_equal "survived", run_payload(client, 2, ORIGINAL)

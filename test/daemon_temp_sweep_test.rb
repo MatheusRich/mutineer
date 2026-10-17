@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "minitest/mock"
 require "tempfile"
 require_relative "test_helper"
 require "mutineer/daemon_server"
@@ -142,6 +143,15 @@ class DaemonTempSweepTest < Minitest::Test
     end
   ensure
     Process.waitpid(zombie) if zombie
+  end
+
+  # The state follows the LAST ") ", since the name may hold one itself. An
+  # empty read (the process exited mid-read) is not a zombie, and must not
+  # raise past the sweep's SystemCallError rescue. Runs on every OS.
+  def test_zombie_check_reads_the_state_after_the_name_and_survives_an_empty_read
+    File.stub(:read, "4242 (a) Z b) S 1 1\n") { refute Mutineer::OrphanGuard.send(:zombie?, 4242) }
+    File.stub(:read, "4242 (a) S b) Z 1 1\n") { assert Mutineer::OrphanGuard.send(:zombie?, 4242) }
+    File.stub(:read, "") { refute Mutineer::OrphanGuard.send(:zombie?, 4242) }
   end
 
   def read_child_path(reader)
