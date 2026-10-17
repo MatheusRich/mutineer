@@ -1062,8 +1062,26 @@ module Mutineer
       raise "refusing to drop #{name}" unless owned_database?(base, name, slots: MYSQL_LOCK_SLOTS, limit: MYSQL_NAME_LIMIT)
 
       quoted = quote_mysql_ident(name)
+      charset, collation = mysql_database_defaults(conn, base)
       mysql_exec(conn, "DROP DATABASE IF EXISTS #{quoted}")
-      mysql_exec(conn, "CREATE DATABASE #{quoted} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+      mysql_exec(conn, "CREATE DATABASE #{quoted} CHARACTER SET #{charset} COLLATE #{collation}")
+    end
+
+    # The test database's default character set and collation. A table the
+    # schema creates without its own collation then compares text the same way
+    # in each worker database as in the test database.
+    #
+    # @param conn [Mysql2::Client, Trilogy]
+    # @param base [String] the test database name.
+    # @return [Array(String, String)] the character set and the collation.
+    # @raise [RuntimeError] when the test database is missing or reports an unexpected name.
+    def self.mysql_database_defaults(conn, base)
+      row = mysql_rows(conn, "SELECT DEFAULT_CHARACTER_SET_NAME AS charset, DEFAULT_COLLATION_NAME AS collation " \
+                             "FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = #{mysql_quote_string(conn, base)}").first
+      values = row && [row["charset"].to_s, row["collation"].to_s]
+      raise "cannot read the character set of #{base}" unless values&.all? { |value| value.match?(/\A\w+\z/) }
+
+      values
     end
 
     # Load `schema.rb` or `structure.sql` into the empty slot with the app's

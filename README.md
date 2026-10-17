@@ -273,7 +273,7 @@ Each MySQL 8 worker uses a database named `<base>-mutineer-<N>` (shortened when 
 Mutineer creates that database, loads `schema.rb` or `structure.sql`, and copies rows before the workers start.
 It does not copy the database again after an error or a timeout.
 The worker databases stay in place when the run ends. The next run drops and rebuilds them.
-The database user needs CREATE and DROP for those names.
+The database user needs CREATE, DROP, and the table and row privileges a schema load and a row copy use (such as ALTER, INDEX, REFERENCES, and INSERT) on those names, plus SELECT on the test database.
 An app on `structure.sql` also needs the `mysql` client on `PATH`.
 Drop one with ``DROP DATABASE `myapp_test-mutineer-0`;`` (MySQL quotes the name with backticks).
 A second run on the same test database stops with `another Mutineer run is using <base>` until the first run ends.

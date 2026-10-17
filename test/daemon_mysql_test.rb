@@ -189,27 +189,32 @@ class DaemonMysqlTest < Minitest::Test
       require "mysql2"
       require #{WORKER_DB.inspect}
       load #{File.join(APP, "db/schema.rb").inspect}
-      ActiveRecord::Base.connection.execute("DELETE FROM orders")
-      ActiveRecord::Base.connection.execute("INSERT INTO orders (quantity, unit_price_cents, rush, created_at, updated_at) VALUES (3, 4, 0, NOW(), NOW())")
-      ActiveRecord.schema_format = :sql
-      Mutineer::RailsWorkerDb.provision(1)
-      name = Mutineer::RailsWorkerDb.mysql_worker_database(#{BASE.inspect}, 0)
-      conn = Mysql2::Client.new(#{mysql_connect_literal(BASE.inspect)})
-      def column_list(conn, schema, table)
-        sql = "SELECT COLUMN_NAME AS n, COLUMN_TYPE AS t, IS_NULLABLE AS nullable, EXTRA AS extra " \
-              "FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '\#{conn.escape(schema)}' " \
-              "AND TABLE_NAME = '\#{conn.escape(table)}' ORDER BY ORDINAL_POSITION"
-        conn.query(sql, as: :hash).map { |row| [row["n"], row["t"], row["nullable"], row["extra"]].join(":") }.join(",")
+      begin
+        ActiveRecord::Base.connection.execute("DELETE FROM orders")
+        ActiveRecord::Base.connection.execute("INSERT INTO orders (quantity, unit_price_cents, rush, created_at, updated_at) VALUES (3, 4, 0, NOW(), NOW())")
+        ActiveRecord.schema_format = :sql
+        Mutineer::RailsWorkerDb.provision(1)
+        name = Mutineer::RailsWorkerDb.mysql_worker_database(#{BASE.inspect}, 0)
+        conn = Mysql2::Client.new(#{mysql_connect_literal(BASE.inspect)})
+        def column_list(conn, schema, table)
+          sql = "SELECT COLUMN_NAME AS n, COLUMN_TYPE AS t, IS_NULLABLE AS nullable, EXTRA AS extra " \
+                "FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '\#{conn.escape(schema)}' " \
+                "AND TABLE_NAME = '\#{conn.escape(table)}' ORDER BY ORDINAL_POSITION"
+          conn.query(sql, as: :hash).map { |row| [row["n"], row["t"], row["nullable"], row["extra"]].join(":") }.join(",")
+        end
+        quoted = "`" + name.gsub("`", "``") + "`"
+        mark = conn.query("SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = '\#{conn.escape(name)}' AND TABLE_NAME = 'structure_marks'", as: :hash).first["c"]
+        base_count = conn.query("SELECT COUNT(*) AS c FROM orders", as: :hash).first["c"]
+        slot_count = conn.query("SELECT COUNT(*) AS c FROM \#{quoted}.orders", as: :hash).first["c"]
+        base_cols = column_list(conn, #{BASE.inspect}, "orders")
+        slot_cols = column_list(conn, name, "orders")
+        puts "orders_match=\#{base_cols == slot_cols}"
+        puts "mark=\#{mark}"
+        puts "rows=\#{base_count}:\#{slot_count}"
+      ensure
+        # Later tests copy the test database, so leave orders as the schema load left it.
+        Mysql2::Client.new(#{mysql_connect_literal(BASE.inspect)}).query("DELETE FROM orders")
       end
-      quoted = "`" + name.gsub("`", "``") + "`"
-      mark = conn.query("SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = '\#{conn.escape(name)}' AND TABLE_NAME = 'structure_marks'", as: :hash).first["c"]
-      base_count = conn.query("SELECT COUNT(*) AS c FROM orders", as: :hash).first["c"]
-      slot_count = conn.query("SELECT COUNT(*) AS c FROM \#{quoted}.orders", as: :hash).first["c"]
-      base_cols = column_list(conn, #{BASE.inspect}, "orders")
-      slot_cols = column_list(conn, name, "orders")
-      puts "orders_match=\#{base_cols == slot_cols}"
-      puts "mark=\#{mark}"
-      puts "rows=\#{base_count}:\#{slot_count}"
     RUBY
     out, status = fixture_ruby(script)
     assert status.success?, out

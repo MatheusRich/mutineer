@@ -375,6 +375,7 @@ class RailsWorkerDbTest < Minitest::Test
   end
 
   def test_load_mysql_schema_restores_the_base_connection
+    saved = Object.send(:remove_const, :ActiveRecord) if Object.const_defined?(:ActiveRecord)
     calls = []
     base = Class.new do
       define_singleton_method(:establish_connection) { |config| calls << config[:database] }
@@ -401,6 +402,7 @@ class RailsWorkerDbTest < Minitest::Test
     assert_equal %w[app_test-mutineer-0 app_test], calls
   ensure
     Object.send(:remove_const, :ActiveRecord) if Object.const_defined?(:ActiveRecord)
+    Object.const_set(:ActiveRecord, saved) if saved
   end
 
   def test_too_many_mysql_workers_fail_before_a_connection
@@ -439,6 +441,36 @@ class RailsWorkerDbTest < Minitest::Test
     Mutineer::RailsWorkerDb.forget_lock_connection_after_fork!
     assert_nil Mutineer::RailsWorkerDb.instance_variable_get(:@lock_connection)
     assert_empty Mutineer::RailsWorkerDb.instance_variable_get(:@mysql_held_locks)
+  end
+
+  # Mutant forks reach the lock only through after_fork, so the hook itself
+  # must forget the parent's lock connection before it connects the worker.
+  def test_after_fork_forgets_the_lock_connection_before_connecting
+    db = Mutineer::RailsWorkerDb
+    db.instance_variable_set(:@lock_connection, Object.new)
+    db.instance_variable_set(:@mysql_held_locks, ["m:abc:g"])
+    seen = :not_called
+    db.stub(:available?, true) do
+      db.stub(:current_adapter, "mysql2") do
+        db.stub(:connect, ->(_slot) { seen = db.instance_variable_get(:@lock_connection) }) do
+          db.stub(:verify_connection!, nil) { db.after_fork(0) }
+        end
+      end
+    end
+    assert_nil seen
+    assert_empty db.instance_variable_get(:@mysql_held_locks)
+  end
+
+  def test_mysql_recreate_copies_the_test_database_collation
+    queries = []
+    conn = Object.new
+    conn.define_singleton_method(:escape) { |value| value }
+    conn.define_singleton_method(:query) do |sql|
+      queries << sql
+      HashRows.new([{ "charset" => "utf8mb4", "collation" => "utf8mb4_0900_ai_ci" }]) if sql.include?("SCHEMATA")
+    end
+    Mutineer::RailsWorkerDb.recreate_mysql_database(conn, "myapp_test-mutineer-0", "myapp_test")
+    assert_equal "CREATE DATABASE `myapp_test-mutineer-0` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci", queries.last
   end
 
   # A freed client sends QUIT (mysql2) or Terminate (pg) on the shared socket,
@@ -569,7 +601,7 @@ class RailsWorkerDbTest < Minitest::Test
     end
 
     def escape(value)
-      value.to_s.gsub("\\", "\\\\").gsub("'", "''")
+      value.to_s.gsub("\\") { "\\\\" }.gsub("'", "''")
     end
 
     def rows_for(sql)

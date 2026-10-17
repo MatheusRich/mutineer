@@ -156,7 +156,8 @@ module Mutineer
         # Raises DaemonBootError. Callers must not score mutants after this.
         client.provision(worker_count)
         [coverage_map_from_client(client, config), worker_count, client]
-      rescue StandardError
+      rescue Exception # rubocop:disable Lint/RescueException
+        # An interrupt must also quit it, or the daemon keeps its database lock.
         client.quit
         raise
       end

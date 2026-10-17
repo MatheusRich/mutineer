@@ -95,7 +95,7 @@ Add `--threshold 90` when a folder is ready for a hard gate.
 It works with Minitest on a SQLite file, PostgreSQL, or MySQL 8 (`mysql2` or `trilogy`).
 MariaDB is not tested. MySQL 5.7 is not supported.
 An app with more than one database runs one worker.
-On another adapter, `--daemon` scores every mutant as an error.
+On another adapter, `--daemon` stops the run with an error before it scores any mutant.
 The [support matrix](https://github.com/davidteren/mutineer#is-it-production-ready) lists each case.
 Leave `daemon` commented in `.mutineer.yml` until that matrix says your app fits.
 Run without the daemon to stay serial on other adapters.

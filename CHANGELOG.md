@@ -26,8 +26,9 @@ All notable changes to this project are documented here. The format is based on
   A second run cannot drop a database another live run holds. An app with
   more than one database config runs one worker and says so once.
   The worker databases stay after the run.
-- **MySQL 8 worker databases for `--rails --daemon`.** Each worker gets
-  `<base>-mutineer-<N>` on `mysql2` or `trilogy`. Mutineer creates the
+- **MySQL 8 worker databases for Minitest on `--rails --daemon`.** Each worker gets
+  `<base>-mutineer-<N>` on `mysql2` or `trilogy`, with the base shortened to fit
+  MySQL's 64-byte name limit. Mutineer creates the
   database, loads `schema.rb` or `structure.sql`, and copies rows once at
   the start. A second run cannot drop a database another live run holds.
   That work uses the TLS and timeout settings from the database config.

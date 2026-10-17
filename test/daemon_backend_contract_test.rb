@@ -498,6 +498,24 @@ class DaemonBackendContractTest < Minitest::Test
     end
   end
 
+  def test_prepare_run_quits_the_client_when_provision_is_interrupted
+    Dir.mktmpdir("mutineer-prepare") do |root|
+      config = Mutineer::Config.new(sources: [], tests: [], project_root: root, framework: "minitest")
+      stop = Class.new(Exception) # rubocop:disable Lint/InheritException
+      quits = 0
+      client = Object.new
+      client.define_singleton_method(:start) { self }
+      client.define_singleton_method(:database_count) { 1 }
+      client.define_singleton_method(:provision) { |_count| raise stop }
+      client.define_singleton_method(:quit) { quits += 1 }
+
+      Mutineer::DaemonClient.stub(:new, ->(**) { client }) do
+        assert_raises(stop) { Mutineer::DaemonBackend.send(:prepare_run, config, [], 2) }
+      end
+      assert_equal 1, quits
+    end
+  end
+
   def test_a_failed_worker_boot_still_quits_the_prepare_daemon
     order = []
     prepare = Object.new
