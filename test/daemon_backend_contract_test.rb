@@ -198,7 +198,11 @@ class DaemonBackendContractTest < Minitest::Test
       client = Object.new
       def client.start = self
       def client.quit = nil
-      def client.request(id:, **) = id.zero? ? "survived" : "killed"
+      def client.sent = (@sent ||= [])
+      def client.request(id:, tests:, **)
+        sent << tests
+        id.zero? ? "survived" : "killed"
+      end
       results = Mutineer::JobPlan.stub(:coverage_selection, [:maybe, ["/p/test/order_test.rb"]]) do
         Mutineer::DaemonClient.stub(:new, ->(**) { client }) do
           Mutineer::DaemonBackend.send(:run_serial, jobs, config, [], coverage_map, source_map)
@@ -206,6 +210,7 @@ class DaemonBackendContractTest < Minitest::Test
       end
 
       assert_equal %i[no_coverage killed], results.map(&:status)
+      assert_equal [["/p/test/order_test.rb"]] * 2, client.sent, "the daemon runs only the :maybe tests"
     end
   end
 

@@ -12,7 +12,7 @@ module Mutineer
     # @param def_node [Prism::DefNode] the method that holds the position.
     # @param source [String] the source text of the file.
     # @param offset [Integer] byte offset of the position.
-    # @param sometimes [Boolean] also return the lines when the position is in
+    # @param loose [Boolean] also return the lines when the position is in
     #   code that runs only sometimes when the statement runs (the right side of
     #   `a && b`, a branch, the body of `x if c`). The tests that ran the
     #   statement then include every test that ran the position, but may not
@@ -22,7 +22,7 @@ module Mutineer
     #   A first or last line that holds other code is left out, because Ruby
     #   can count that line without the statement: the `def` line counts when
     #   the file loads, and `x if done; y(` counts when `y` does not run.
-    def self.for(def_node, source, offset, sometimes: false)
+    def self.for(def_node, source, offset, loose: false)
       return [] unless def_node.body
 
       path = path_to(def_node.body, offset) || []
@@ -30,7 +30,7 @@ module Mutineer
       return [] unless index
 
       statement = path[index]
-      unless sometimes
+      unless loose
         # Code that runs only sometimes inside the statement: the tests that ran
         # the statement need not have run it.
         return [] if path[index..].each_cons(2).any? { |parent, child| sometimes?(parent, child) }

@@ -20,7 +20,21 @@ class StatementLinesTest < Minitest::Test
     def_node = Mutineer::Parser.parse_string(source).value.statements.body.first
     offset = source.index("age > 17")
     assert_empty Mutineer::StatementLines.for(def_node, source, offset)
-    assert_equal [2, 3], Mutineer::StatementLines.for(def_node, source, offset, sometimes: true)
+    assert_equal [2, 3], Mutineer::StatementLines.for(def_node, source, offset, loose: true)
+  end
+
+  # The body of `x if c` runs only when `c` holds; loose mode gives its lines.
+  def test_the_body_of_a_multi_line_if_modifier_has_lines_only_when_asked
+    source = <<~'RUBY'
+      def f(c)
+        foo(1,
+            two) if c
+      end
+    RUBY
+    def_node = Mutineer::Parser.parse_string(source).value.statements.body.first
+    offset = source.index("two")
+    assert_empty Mutineer::StatementLines.for(def_node, source, offset)
+    refute_empty Mutineer::StatementLines.for(def_node, source, offset, loose: true)
   end
 
   def test_a_later_entry_of_a_hash_belongs_to_the_hash

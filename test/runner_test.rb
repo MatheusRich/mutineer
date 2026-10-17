@@ -275,6 +275,23 @@ class RunnerTest < Minitest::Test
     kind, = selection(source, "false", {})
 
     assert_equal :verdict, kind
+    # #254: code that runs only sometimes is not ran_at_load, even when its
+    # statement's first line ran at load: only the strict lines count there.
+    assert_equal :no_coverage, selection(source, "false", {}, load_lines: [2])[1].status
+  end
+
+  # #254: for a `:maybe` selection only a kill is new; every other result is
+  # no_coverage with no --matrix row, as before. Any other selection is untouched.
+  def test_selection_verdict_keeps_only_a_kill_of_a_maybe_mutant
+    row = Mutineer::Kills.new(killed_by: [], ran: ["t_test.rb"], complete: true)
+    killed = Mutineer::Result.new(status: :killed, kills: row)
+    assert_same killed, Mutineer::JobPlan.selection_verdict(:maybe, killed)
+    %i[survived error timeout].each do |status|
+      result = Mutineer::JobPlan.selection_verdict(:maybe, Mutineer::Result.new(status: status, kills: row))
+      assert_equal [:no_coverage, nil], [result.status, result.kills], status
+    end
+    survived = Mutineer::Result.new(status: :survived, kills: row)
+    [:run, nil, false].each { |kind| assert_same survived, Mutineer::JobPlan.selection_verdict(kind, survived) }
   end
 
   # --since restricts the job list to mutations on changed lines. Deterministic:
