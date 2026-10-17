@@ -362,7 +362,7 @@ Some mutants are equivalent (behaviour-identical) and survive forever — keepin
 file off 100%. Suppress them so the score and `--threshold` gate stay meaningful:
 
 - **Inline:** `some_line # mutineer:disable-line` (or scope it: `# mutineer:disable-line comparison`). Put a reason after `--`: `# mutineer:disable-line comparison -- the test checks only 20`. The reason is stored on the ignored mutant and shown in the JSON report and the HTML report. A marker with no reason stores none.
-- **Config:** a `.mutineer.yml` `ignore:` list. A bare mutant id still works. A mapping is `id` plus an optional `reason`. Mutineer 1.7 is the first version that reads a mapping. An older version matches no mutant to a mapping and does not warn, so the mutant it names is not ignored. Add a mapping only after every gate that reads the file runs 1.7 or later (the Action's `version:` pin, your CI `Gemfile.lock`). The reason shows in the same reports as an inline reason. Each survivor's `id` is printed in the JSON report.
+- **Config:** a `.mutineer.yml` `ignore:` list. A bare mutant id still works. A mapping is `id` plus an optional `reason`. Mutineer 1.7 is the first version that reads a mapping. An older version matches no mutant to a mapping and does not warn, so the mutant it names is not ignored. Add a mapping only after every gate that reads the file runs 1.7 or later. In the Action, the `version:` input sets the version, or your `Gemfile.lock` does when you set `use-bundler: true`. In your own CI job, your `Gemfile.lock` sets it. The reason shows in the same reports as an inline reason. Each survivor's `id` is printed in the JSON report.
 
 `mutineer triage REPORT.json --reason TEXT --all` prints one mapping entry per survivor. `--id ID` prints one entry. Repeat `--id` for several. The command does not edit files. Paste the lines under `ignore:`. They are mappings, so every gate that reads the file must run 1.7 or later (see **Config** above).
 
@@ -408,8 +408,9 @@ working until 2.0, with a warning:
   matches on the old id alone. The run tells you to
   generate a new baseline with `--format json`. `migrate` does not rewrite a
   baseline. Generate the new file only after every gate
-  that reads it runs 1.3 or later (the Action's `version:` pin, your CI
-  `Gemfile.lock`). An older version treats every new-format survivor as new.
+  that reads it runs 1.3 or later. In the Action, the `version:` input sets
+  the version, or your `Gemfile.lock` does when you set `use-bundler: true`.
+  In your own CI job, your `Gemfile.lock` sets it. An older version treats every new-format survivor as new.
 
 The JSON report's `summary.id_format` is `2` for the new format.
 `summary.legacy_id_matches.ignore` counts the old-format ignore entries a run
