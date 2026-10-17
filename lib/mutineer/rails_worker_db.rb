@@ -1161,6 +1161,8 @@ module Mutineer
     # did not create is cloned with CREATE TABLE ... LIKE, then its foreign keys
     # are added. LIKE does not copy them. Each table's AUTO_INCREMENT is set
     # from the base after the rows, so a deleted high id is not reused.
+    # Triggers the schema load created are dropped for the copy and created
+    # again after it, so the copied rows match the base.
     #
     # @param conn [Mysql2::Client, Trilogy]
     # @param base [String]
@@ -1175,6 +1177,7 @@ module Mutineer
       rescue StandardError
         nil # MariaDB has no such cache or variable.
       end
+      triggers = drop_mysql_triggers(conn, dest)
       tables = mysql_rows(conn, <<~SQL)
         SELECT TABLE_NAME AS table_name
         FROM information_schema.TABLES
@@ -1200,12 +1203,74 @@ module Mutineer
       end
       cloned.each { |table| copy_mysql_foreign_keys(conn, base, dest, table) }
       names.each { |table| copy_mysql_auto_increment(conn, base, dest, table) }
+      recreate_mysql_triggers(conn, dest, triggers)
     ensure
       begin
         mysql_exec(conn, "SET FOREIGN_KEY_CHECKS = 1")
       rescue StandardError
         nil
       end
+    end
+
+    # Drop every trigger on `dest` and return what {recreate_mysql_triggers}
+    # needs to create each one again. Triggers on one table event come back in
+    # ACTION_ORDER. MySQL 8's CREATE text has no FOLLOWS or PRECEDES, so
+    # creating them in that order keeps their order.
+    #
+    # @param conn [Mysql2::Client, Trilogy]
+    # @param dest [String]
+    # @return [Array<Hash>] `:sql`, `:sql_mode` and `:collation` for each trigger.
+    def self.drop_mysql_triggers(conn, dest)
+      rows = mysql_rows(conn, <<~SQL)
+        SELECT TRIGGER_NAME AS trigger_name
+        FROM information_schema.TRIGGERS
+        WHERE TRIGGER_SCHEMA = #{mysql_quote_string(conn, dest)}
+        ORDER BY EVENT_OBJECT_TABLE, ACTION_TIMING, EVENT_MANIPULATION, ACTION_ORDER
+      SQL
+      rows.filter_map do |row|
+        name = row["trigger_name"].to_s
+        next if name.empty?
+
+        qualified = "#{quote_mysql_ident(dest)}.#{quote_mysql_ident(name)}"
+        shown = mysql_rows(conn, "SHOW CREATE TRIGGER #{qualified}").first
+        raise "cannot read trigger #{name} on #{dest}" unless shown
+
+        mysql_exec(conn, "DROP TRIGGER #{qualified}")
+        { sql: shown["sql original statement"].to_s, sql_mode: shown["sql_mode"].to_s,
+          collation: shown["collation_connection"].to_s }
+      end
+    end
+
+    # Create the triggers {drop_mysql_triggers} dropped. Each one is created
+    # with its own sql_mode and connection collation, which decide how MySQL
+    # reads its body. The CREATE text names no database, so this session
+    # switches to `dest`. The session's sql_mode and collation are put back.
+    #
+    # @param conn [Mysql2::Client, Trilogy]
+    # @param dest [String]
+    # @param triggers [Array<Hash>]
+    # @return [void]
+    def self.recreate_mysql_triggers(conn, dest, triggers)
+      return if triggers.empty?
+
+      saved = mysql_rows(conn, "SELECT @@SESSION.sql_mode AS sql_mode, @@SESSION.collation_connection AS collation").first
+      mysql_exec(conn, "USE #{quote_mysql_ident(dest)}")
+      triggers.each do |trigger|
+        mysql_exec(conn, mysql_session_modes_sql(conn, trigger[:sql_mode], trigger[:collation]))
+        mysql_exec(conn, trigger[:sql])
+      end
+      mysql_exec(conn, mysql_session_modes_sql(conn, saved["sql_mode"], saved["collation"]))
+    end
+
+    # SET statement for the session's sql_mode and connection collation.
+    #
+    # @param conn [Mysql2::Client, Trilogy]
+    # @param sql_mode [String]
+    # @param collation [String]
+    # @return [String]
+    def self.mysql_session_modes_sql(conn, sql_mode, collation)
+      "SET SESSION sql_mode = #{mysql_quote_string(conn, sql_mode)}, " \
+        "collation_connection = #{mysql_quote_string(conn, collation)}"
     end
 
     # Create `table` on `dest` when the schema load did not. LIKE copies columns,

@@ -225,6 +225,69 @@ class DaemonMysqlTest < Minitest::Test
     File.delete(path) if path && File.exist?(path)
   end
 
+  # The schema load creates the triggers in the slot before the copy. They must
+  # not fire on the copied rows, and they must exist again after the copy.
+  def test_structure_sql_triggers_do_not_fire_during_the_copy
+    path = File.join(APP, "db", "structure.sql")
+    File.write(path, <<~SQL)
+      CREATE TABLE trigger_audits (
+        id int NOT NULL AUTO_INCREMENT,
+        item_id int NOT NULL,
+        PRIMARY KEY (id)
+      ) ENGINE=InnoDB;
+      CREATE TABLE trigger_items (
+        id int NOT NULL,
+        label varchar(20) NOT NULL,
+        PRIMARY KEY (id)
+      ) ENGINE=InnoDB;
+      CREATE TRIGGER trigger_items_label BEFORE INSERT ON trigger_items FOR EACH ROW SET NEW.label = 'from trigger';
+      SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION';
+      CREATE TRIGGER trigger_items_audit AFTER INSERT ON trigger_items FOR EACH ROW INSERT INTO trigger_audits (item_id) VALUES (NEW.id);
+    SQL
+    script = <<~RUBY
+      require "./config/environment"
+      require "mysql2"
+      require #{WORKER_DB.inspect}
+      conn = Mysql2::Client.new(#{mysql_connect_literal(BASE.inspect)})
+      begin
+        # The same mysql client load Rails gives the slot, so both sides have the same triggers.
+        ActiveRecord::Tasks::DatabaseTasks.structure_load(ActiveRecord::Base.connection_db_config, #{path.inspect})
+        conn.query("INSERT INTO trigger_items (id, label) VALUES (1, 'a'), (2, 'b')")
+        conn.query("UPDATE trigger_items SET label = CONCAT('base ', id)")
+        ActiveRecord.schema_format = :sql
+        Mutineer::RailsWorkerDb.provision(1)
+        name = Mutineer::RailsWorkerDb.mysql_worker_database(#{BASE.inspect}, 0)
+        quoted = "`" + name.gsub("`", "``") + "`"
+        dump = lambda do |sql|
+          conn.query(sql, as: :array).map { |row| row.join(":") }.join(",")
+        end
+        triggers = lambda do |schema|
+          dump.call("SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, ACTION_TIMING, EVENT_MANIPULATION, ACTION_ORDER, " \\
+                    "ACTION_STATEMENT, SQL_MODE, COLLATION_CONNECTION, DEFINER FROM information_schema.TRIGGERS " \\
+                    "WHERE TRIGGER_SCHEMA = '\#{conn.escape(schema)}' ORDER BY TRIGGER_NAME")
+        end
+        %w[trigger_items trigger_audits].each do |table|
+          base_rows = dump.call("SELECT * FROM \#{table} ORDER BY id")
+          slot_rows = dump.call("SELECT * FROM \#{quoted}.\#{table} ORDER BY id")
+          puts "\#{table}=\#{base_rows} slot=\#{slot_rows} match=\#{base_rows == slot_rows}"
+        end
+        base_triggers = triggers.call(#{BASE.inspect})
+        slot_triggers = triggers.call(name)
+        puts "triggers=\#{base_triggers} slot=\#{slot_triggers} match=\#{!base_triggers.empty? && base_triggers == slot_triggers}"
+      ensure
+        conn.query("DROP TABLE IF EXISTS trigger_items")
+        conn.query("DROP TABLE IF EXISTS trigger_audits")
+      end
+    RUBY
+    out, status = fixture_ruby(script)
+    assert status.success?, out
+    assert_match(/^trigger_items=1:base 1,2:base 2 slot=\S.* match=true$/, out)
+    assert_match(/^trigger_audits=1:1,2:2 slot=.* match=true$/, out)
+    assert_match(/^triggers=.* match=true$/, out)
+  ensure
+    File.delete(path) if path && File.exist?(path)
+  end
+
   def test_generated_column_and_foreign_key_copy_without_error
     script = <<~RUBY
       require "./config/environment"
