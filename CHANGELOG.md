@@ -12,8 +12,10 @@ All notable changes to this project are documented here. The format is based on
   `# mutineer:disable-line`, and a `.mutineer.yml` `ignore:` mapping
   (`id` plus `reason`), is stored on the ignored mutant. The JSON report
   (`schema_version` 1.8) and the HTML report show it. A mapping with no
-  `id`, or with an unknown key, warns. Mutineer 1.9 is the first version
-  that reads a mapping. Older versions do not understand one.
+  `id`, or with an unknown key, warns. Mutineer 1.7 is the first version
+  that reads a mapping. An older version matches no mutant to a mapping
+  and does not warn, so the mutant it names is not ignored. Upgrade
+  every gate that reads the file before you add a mapping.
   `mutineer migrate` rewrites the old id inside a mapping and keeps its
   reason.
 - **`mutineer triage`.** It prints `ignore:` mapping entries for survivors
@@ -30,7 +32,9 @@ All notable changes to this project are documented here. The format is based on
   `<base>-mutineer-<N>` on `mysql2` or `trilogy`, with the base shortened to fit
   MySQL's 64-byte name limit. Mutineer creates the
   database, loads `schema.rb` or `structure.sql`, and copies rows once at
-  the start. A second run cannot drop a database another live run holds.
+  the start. Triggers from the schema do not fire on the copied rows.
+  Mutineer creates them again after the copy.
+  A second run cannot drop a database another live run holds.
   That work uses the TLS and timeout settings from the database config.
   MariaDB is not tested. MySQL 5.7 is not supported. The worker databases
   stay after the run.
@@ -97,6 +101,17 @@ All notable changes to this project are documented here. The format is based on
 - **A Rails daemon boots again while a mutant file is still open.**
   The file stays when another process holds it. The next boot skips
   that file name instead of stopping.
+- **A daemon crash no longer leaves a mutant file in your source folder
+  (#250).** When a daemon dies during a mutant, its child dies a moment
+  later. The new daemon cleaned up before that, so the child's file stayed.
+  The next Rails boot then failed on the file name. Each daemon run now
+  cleans up again when it ends or stops early. It waits up to 1.5 seconds
+  for the child to go. A file whose owner still runs after that stays
+  until the next daemon run removes it. On Linux, a file whose owner is a
+  zombie (in a container whose pid 1 does not reap it) is now removed.
+  With `--jobs N`, an error in one worker stops the others after their
+  current mutant, and a Ctrl-C quits every worker daemon before the run
+  ends.
 - **SimpleCov in a test helper no longer breaks every mutant under
   `--rails` or `--boot` (#248).** After the coverage map is built, mutineer
   pauses Ruby's coverage (#228). SimpleCov saw the paused coverage as off and
@@ -104,6 +119,38 @@ All notable changes to this project are documented here. The format is based on
   helper raised in every mutant. Now a start in a mutant first stops the
   paused coverage. A mutant whose tests start nothing keeps it paused and pays
   nothing. This applies to `--daemon` too.
+- **Methods in an ActiveSupport::Concern `class_methods` block are mutated
+  under `--strategy redefine` (#252).** ActiveSupport puts these methods in
+  the concern's `ClassMethods` module, and each includer gets them as class
+  methods. Mutineer named them as instance methods of the concern itself.
+  Redefine (the `--rails` default) then loaded each mutant onto the concern.
+  The tests called the includer's method, so every mutant falsely survived.
+  These methods are now named `Concern::ClassMethods#name`, and redefine
+  loads the mutant onto that module. This applies to a module that ran
+  `extend ActiveSupport::Concern` earlier in the same file. The mutant ids of
+  these methods change, because an id contains the qualified name (owner and
+  method). An instance
+  method with the same name, later in the same file, can get a new id too.
+  An `ignore:` entry or a `--baseline` survivor for one of these methods no
+  longer matches. Replace it with the new id from a new run.
+- **Methods in other `class_methods`, `included` and `prepended` blocks are
+  `unplaceable` under `--strategy redefine` (#252).** ActiveSupport runs an
+  `included` or `prepended` block in each includer, so no constant names the
+  class that owns its methods. A `class_methods` block that Mutineer cannot
+  tie to a concern has the same problem: one in a def, in Rails'
+  `concerning`, in an unassigned `Module.new`, or in a module that does not
+  run `extend ActiveSupport::Concern` earlier in the file. Redefine loaded each
+  mutant onto the enclosing module, and the mutant could falsely survive. Now
+  redefine reports these mutants as `unplaceable` and does not run them. Like
+  every `unplaceable` mutant, they leave the score and do not count toward
+  `--threshold`, so a gate that failed on these false survivors can now pass.
+  Their names and mutant ids do not change. `--strategy reload` runs them, but under
+  ActiveSupport it cannot yet run a concern file that has an `included` or
+  `prepended` block: those mutants are `errored` (#257). Another library's
+  method with one of these names is `unplaceable` under redefine too, even
+  when that library runs the block in the module itself and redefine used to
+  run it correctly. Mutineer cannot tell that library from ActiveSupport, so it
+  does not guess. Use `--strategy reload` for those mutants.
 - **A mutant on a later line of a multi-line `&&` or `||` can be killed
   (#254).** Ruby counts only the first line of a statement. For code that runs
   only sometimes on a later line, such as the right side of `verified &&` on
