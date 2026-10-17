@@ -204,21 +204,18 @@ module Mutineer
 
     # The verdict of a mutant whose tests {coverage_selection} chose as `:maybe`:
     # they ran its statement but may not have run the mutated code. A kill is a
-    # real kill. Any other result is no_coverage, as it was before #254: a
-    # survivor cannot tell "never ran" from "ran unchecked", and an error or a
-    # timeout does not show that the tests reached the mutant (under reload, a
-    # class body can run it at load). Like any no_coverage mutant it has no
-    # `--matrix` row. A kill's row keeps only its killers in `ran`: they alone
-    # are known to have reached the mutant, and another test there would look
-    # blind ({KillMatrix#blind}). A result of any other selection comes back unchanged.
+    # real kill. A survivor is no_coverage, because the run cannot tell "never
+    # ran" from "ran unchecked" (#254); like any no_coverage mutant it has no
+    # `--matrix` row. An error or a timeout stays what it is: the mutant ran, and
+    # a failure is reported, not hidden. A kill keeps its whole `--matrix` row.
+    # A result of any other selection comes back unchanged.
     #
     # @param kind [Symbol, nil, false] the first element of {coverage_selection}'s
     #   answer, or a falsy value when no selection ran.
     # @param result [Mutineer::Result] the mutant's verdict.
     # @return [Mutineer::Result]
     def self.selection_verdict(kind, result)
-      return result unless kind == :maybe
-      return result.with(kills: result.kills&.with(ran: result.kills.killed_by)) if result.killed?
+      return result unless kind == :maybe && result.survived?
 
       result.with(status: :no_coverage, kills: nil)
     end

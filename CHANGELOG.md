@@ -109,15 +109,15 @@ All notable changes to this project are documented here. The format is based on
   only sometimes on a later line, such as the right side of `verified &&` on
   its own line, Mutineer picked no tests, so the mutant was always
   `no_coverage`, however good the tests were. Now it runs the tests that ran
-  the statement. A kill counts. Any other result, a survivor, an error or a
-  timeout, stays `no_coverage`, because the run cannot tell whether those
-  tests reached it. So a mutant can only move from `no_coverage` to killed:
-  no survivor or error is added, but a score can rise with no test change.
+  the statement. A kill counts. A survivor stays `no_coverage`, because the
+  run cannot tell whether those tests reached it, so no survivor is added and
+  a score can rise with no test change. Such a mutant can now also end as
+  `errored` or `timeout`; like any mutant with no verdict, that counts toward
+  the `--threshold` completeness check, so a failure is reported, not hidden.
   This also applies to a later `when` condition, the value of `x rescue y`,
   `&.` arguments and an `||=` value on a later line, and to `--daemon`. A
   branch of a ternary or `if`, and the body of `x if c`, keep the verdict they
-  had before. In a `--matrix` run, a kill of such a mutant lists only its
-  killers as tests that ran it.
+  had before.
 
 ## [1.6.0] - 2026-10-08
 
