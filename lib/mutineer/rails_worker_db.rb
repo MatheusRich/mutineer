@@ -872,7 +872,7 @@ module Mutineer
 
     # Open a session with the app's MySQL client. It starts with no default
     # database, so it is not tied to the test database while it drops and
-    # creates slots. {recreate_mysql_triggers} later selects a slot. Every
+    # creates slots. {restore_mysql_triggers} later selects a slot. Every
     # other statement names its database. The gem does not depend on the client.
     #
     # @param config_hash [Hash]
@@ -1205,7 +1205,7 @@ module Mutineer
       end
       cloned.each { |table| copy_mysql_foreign_keys(conn, base, dest, table) }
       names.each { |table| copy_mysql_auto_increment(conn, base, dest, table) }
-      recreate_mysql_triggers(conn, dest, triggers)
+      restore_mysql_triggers(conn, dest, triggers)
     ensure
       begin
         mysql_exec(conn, "SET FOREIGN_KEY_CHECKS = 1")
@@ -1214,7 +1214,7 @@ module Mutineer
       end
     end
 
-    # Drop every trigger on `dest` and return what {recreate_mysql_triggers}
+    # Drop every trigger on `dest` and return what {restore_mysql_triggers}
     # needs to create each one again. Triggers on one table event come back in
     # ACTION_ORDER. MySQL 8's CREATE text has no FOLLOWS or PRECEDES, so
     # creating them in that order keeps their order.
@@ -1223,12 +1223,13 @@ module Mutineer
     # and older open utf8mb3, which turns a 4-byte character into "?". Under
     # ANSI_QUOTES, MySQL quotes the names with double quotes, which the
     # trigger's own sql_mode may not read. Backticks read in every sql_mode.
-    # The session stays on utf8mb4, so {recreate_mysql_triggers} sends the
+    # The session stays on utf8mb4, so {restore_mysql_triggers} sends the
     # text back unchanged.
     #
     # @param conn [Mysql2::Client, Trilogy]
     # @param dest [String]
     # @return [Array<Hash>] `:name`, `:sql`, `:sql_mode` and `:collation` for each trigger.
+    # @raise [RuntimeError] when SHOW CREATE TRIGGER returns no row for a trigger.
     def self.drop_mysql_triggers(conn, dest)
       rows = mysql_rows(conn, <<~SQL)
         SELECT TRIGGER_NAME AS trigger_name
@@ -1270,7 +1271,7 @@ module Mutineer
     # @param triggers [Array<Hash>]
     # @return [void]
     # @raise [RuntimeError] when MySQL refuses to create a trigger.
-    def self.recreate_mysql_triggers(conn, dest, triggers)
+    def self.restore_mysql_triggers(conn, dest, triggers)
       return if triggers.empty?
 
       saved = mysql_rows(conn, "SELECT @@SESSION.sql_mode AS sql_mode, @@SESSION.collation_connection AS collation").first

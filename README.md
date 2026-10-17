@@ -271,12 +271,11 @@ and leaves them in place when the run ends. Drop one with
 `DROP DATABASE "myapp_test-mutineer-0";` (use your test database name and slot).
 Each MySQL 8 worker uses a database named `<base>-mutineer-<N>` (shortened when that would pass 64 bytes).
 Mutineer creates that database, loads `schema.rb` or `structure.sql`, and copies rows before the workers start.
-Triggers in the schema do not fire on the copied rows: Mutineer drops them for the copy and creates them again.
-That needs the TRIGGER privilege on those names.
-A trigger whose DEFINER is another account also needs SET_USER_ID.
 It does not copy the database again after an error or a timeout.
 The worker databases stay in place when the run ends. The next run drops and rebuilds them.
-The database user needs CREATE, DROP, and the table and row privileges a schema load and a row copy use (such as ALTER, INDEX, REFERENCES, and INSERT) on those names, plus SELECT on the test database.
+Triggers in the schema do not fire on the copied rows: in each worker database, Mutineer drops them for the copy and creates them again.
+The database user needs CREATE, DROP, TRIGGER, and the table and row privileges a schema load and a row copy use (such as ALTER, INDEX, REFERENCES, and INSERT) on the worker databases, plus SELECT on the test database.
+A trigger whose DEFINER is another account also needs SET_USER_ID.
 An app on `structure.sql` also needs the `mysql` client on `PATH`.
 Drop one with ``DROP DATABASE `myapp_test-mutineer-0`;`` (MySQL quotes the name with backticks).
 A second run on the same test database stops with `another Mutineer run is using <base>` until the first run ends.
