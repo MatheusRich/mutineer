@@ -6,6 +6,7 @@ require_relative "coverage_map"
 require_relative "daemon_client"
 require_relative "progress"
 require_relative "job_plan"
+require_relative "orphan_guard"
 
 module Mutineer
   # Daemon execution backend. Boots the app ONCE in a persistent subprocess under
@@ -102,7 +103,8 @@ module Mutineer
       dirs = JobPlan.source_dirs(config)
       deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + SWEEP_GRACE
       loop do
-        break if JobPlan.sweep_orphans(dirs, DAEMON_TEMP_GLOB).empty?
+        still_owned = JobPlan.sweep_orphans(dirs, DAEMON_TEMP_GLOB)
+        break if still_owned.empty?
         break if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
 
         sleep 0.1
@@ -263,6 +265,7 @@ module Mutineer
       results  = Array.new(jobs.size)
       progress = Progress.new(jobs.size)
       queue    = Queue.new
+      errors   = Queue.new
       jobs.each_index { |i| queue << i }
 
       # Both lists grow one entry at a time, so a refused spawn part-way (EMFILE
@@ -278,10 +281,6 @@ module Mutineer
 
       clients.each_with_index do |client, worker|
         threads << Thread.new do
-          # The abort below is re-raised by join and reported once there; without
-          # this Ruby also dumps the thread's backtrace, which the serial path never
-          # does. Same fault, same output, whatever --jobs is set to.
-          Thread.current.report_on_exception = false
           loop do
             i = begin
               queue.pop(true)
@@ -291,53 +290,34 @@ module Mutineer
             results[i] = job_result(jobs[i], i, client, worker, config, coverage_map, abs_tests, source_map)
             progress.tick
           end
-        rescue Exception # rubocop:disable Lint/RescueException
-          # The daemon gave up for good, or a defect escaped (a SystemStackError
-          # too). Stop feeding the other workers rather than letting them score
-          # the rest of the run first; the join below re-raises this and ends the
-          # run. Thread#kill raises nothing, so the ensure's kill skips this.
+        rescue Exception => e # rubocop:disable Lint/RescueException
+          # The daemon gave up for good, or a defect escaped. Stop feeding the
+          # other workers, so they stop after their current mutant, and hand the
+          # error to the main thread. The thread itself ends cleanly.
           queue.clear
-          raise
+          errors << e
         ensure
           client.quit
         end
       end
-      # Join every worker before re-raising, so all daemons have quit and the
-      # end-of-run sweep sees each child gone. The cleared queue stops the others
-      # after their current mutant.
-      failure = nil
-      threads.each do |thread|
-        thread.join
-      rescue Exception => e # rubocop:disable Lint/RescueException
-        # A worker's own error ends its thread before join re-raises it. A live
-        # thread means the exception came from outside (a Ctrl-C, a caller's
-        # Timeout), so go straight to the cleanup below.
-        raise if thread.alive?
-
-        failure ||= e
-      end
-      raise failure if failure
+      # Join every worker before raising, so all daemons have quit and the
+      # end-of-run sweep sees each child gone.
+      threads.each(&:join)
+      raise errors.pop unless errors.empty?
 
       # Every job was popped by some worker and every pop assigns, so no slot can
-      # be nil here: an escaping exception aborts the run via join instead.
+      # be nil here: a worker error is raised above instead.
       results
     ensure
-      # Ctrl-C lands in this thread and skips the joins above. Stop the workers
-      # here too, so each one quits its daemon before the end-of-run sweep, as
-      # the serial path does.
-      # Kill them all first, so their daemons quit at the same time.
+      # An exception from outside (Ctrl-C, a caller's Timeout) skips the joins
+      # above. Kill every worker first, so their daemons quit at the same time,
+      # then wait for them. A second Ctrl-C during that wait still exits.
       queue&.clear
       threads&.each(&:kill)
-      threads&.each do |thread|
-        thread.join
-      rescue SignalException
-        raise # a second Ctrl-C lands here, in the main thread, and still exits
-      rescue Exception # rubocop:disable Lint/RescueException
-        nil # the worker's own error, already raised above
-      end
-      # Quit every client here too. One may have no thread yet (startup failed
-      # or was interrupted), and a thread killed before its block began never
-      # runs its own ensure. A second quit of a client is a no-op.
+      threads&.each(&:join)
+      # Quit every client too. One may have no thread yet (startup failed or
+      # was interrupted), and a thread killed before its block began never runs
+      # its own ensure. A second quit of a client is a no-op.
       clients&.each(&:quit)
     end
 

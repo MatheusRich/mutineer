@@ -319,7 +319,7 @@ class DaemonBackendContractTest < Minitest::Test
         sleep 0.3
         exit!(0)
       end
-      Thread.new { Process.wait(child) } # rubocop:disable ThreadSafety/NewThread
+      Process.detach(child)
       orphan = File.join(config.project_root, "app/mutineer_daemon20260101-#{child}-abcdef.rb")
       aborting_run = lambda do |*|
         File.binwrite(orphan, "class Order; end\n")
@@ -536,11 +536,12 @@ class DaemonBackendContractTest < Minitest::Test
     with_jobs do |jobs, config, source_map|
       quits = Queue.new
       clients = Array.new(2) { |n| waiting_client(n, quits) }
-      interrupt_main_after([0.2])
 
-      assert_raises(Interrupt) do
-        Mutineer::DaemonClient.stub(:new, ->(**) { clients.shift }) do
-          Mutineer::DaemonBackend.send(:run_parallel, jobs, 2, config, [], nil, source_map)
+      interrupt_main_after([0.2]) do
+        assert_raises(Interrupt) do
+          Mutineer::DaemonClient.stub(:new, ->(**) { clients.shift }) do
+            Mutineer::DaemonBackend.send(:run_parallel, jobs, 2, config, [], nil, source_map)
+          end
         end
       end
 
@@ -615,12 +616,13 @@ class DaemonBackendContractTest < Minitest::Test
   def test_a_second_ctrl_c_does_not_wait_for_slow_daemon_quits
     with_jobs do |jobs, config, source_map|
       clients = Array.new(2) { |n| waiting_client(n, Queue.new, quit_delay: 3) }
-      interrupt_main_after([0.2, 0.3])
 
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      assert_raises(Interrupt) do
-        Mutineer::DaemonClient.stub(:new, ->(**) { clients.shift }) do
-          Mutineer::DaemonBackend.send(:run_parallel, jobs, 2, config, [], nil, source_map)
+      interrupt_main_after([0.2, 0.3]) do
+        assert_raises(Interrupt) do
+          Mutineer::DaemonClient.stub(:new, ->(**) { clients.shift }) do
+            Mutineer::DaemonBackend.send(:run_parallel, jobs, 2, config, [], nil, source_map)
+          end
         end
       end
       elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
@@ -670,14 +672,19 @@ class DaemonBackendContractTest < Minitest::Test
     client
   end
 
-  # Raises Interrupt in the calling thread after each delay, like Ctrl-C.
+  # Raises Interrupt in the calling thread after each delay, like Ctrl-C, while
+  # the block runs. The interrupter stops when the block ends, so a stray
+  # Interrupt cannot reach the test runner.
   def interrupt_main_after(delays)
     main = Thread.current
-    Thread.new do # rubocop:disable ThreadSafety/NewThread
+    interrupter = Thread.new do # rubocop:disable ThreadSafety/NewThread
       delays.each do |delay|
         sleep delay
         main.raise(Interrupt)
       end
     end
+    yield
+  ensure
+    interrupter&.kill
   end
 end
