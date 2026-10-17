@@ -554,15 +554,12 @@ class RailsWorkerDbTest < Minitest::Test
   end
 
   def test_row_copy_drops_triggers_first_and_creates_them_again_last
-    conn = ScriptedMysql.new(
-      tables: [{ "table_name" => "items" }], columns: [{ "column_name" => "id", "extra" => "" }],
-      foreign_keys: [], auto_increment: "3", existing_tables: [{ "table_name" => "items" }],
-      triggers: { "items_audit" => "NO_ENGINE_SUBSTITUTION", "items_label" => "ANSI_QUOTES" }
-    )
+    conn = trigger_conn
     Mutineer::RailsWorkerDb.copy_mysql_rows(conn, "app_test", "app_test-mutineer-0")
     sql = conn.queries
     at = ->(text) { sql.index { |query| query.start_with?(text) } || flunk("no #{text} in #{sql.inspect}") }
     assert_operator at.("SET SESSION sql_mode = ''"), :<, at.("SHOW CREATE TRIGGER")
+    assert_operator sql.rindex { |query| query.start_with?("SHOW CREATE TRIGGER") }, :<, at.("DROP TRIGGER")
     assert_operator sql.rindex { |query| query.start_with?("DROP TRIGGER") }, :<, at.("SET SESSION sql_mode = 'STRICT")
     assert_operator at.("SET SESSION sql_mode = 'STRICT"), :<, at.("INSERT INTO")
     assert_operator at.("ALTER TABLE"), :<, at.("USE `app_test-mutineer-0`")
@@ -574,6 +571,29 @@ class RailsWorkerDbTest < Minitest::Test
       "CREATE TRIGGER `items_label`",
       "SET SESSION sql_mode = 'STRICT_TRANS_TABLES', collation_connection = 'utf8mb4_0900_ai_ci'"
     ], replay
+  end
+
+  def test_a_refused_trigger_create_names_the_trigger
+    conn = trigger_conn
+    def conn.query(sql)
+      raise "Access denied; you need the SET_USER_ID privilege" if sql.start_with?("CREATE TRIGGER")
+
+      super
+    end
+    error = assert_raises(RuntimeError) do
+      Mutineer::RailsWorkerDb.copy_mysql_rows(conn, "app_test", "app_test-mutineer-0")
+    end
+    assert_equal "cannot recreate trigger items_audit on app_test-mutineer-0: " \
+                 "Access denied; you need the SET_USER_ID privilege", error.message
+  end
+
+  # One copied table with two schema triggers, each saved in its own sql_mode.
+  def trigger_conn
+    ScriptedMysql.new(
+      tables: [{ "table_name" => "items" }], columns: [{ "column_name" => "id", "extra" => "" }],
+      foreign_keys: [], auto_increment: "3", existing_tables: [{ "table_name" => "items" }],
+      triggers: { "items_audit" => "NO_ENGINE_SUBSTITUTION", "items_label" => "ANSI_QUOTES" }
+    )
   end
 
   def test_an_unknown_foreign_key_action_is_rejected

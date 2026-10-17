@@ -31,6 +31,7 @@ All notable changes to this project are documented here. The format is based on
   MySQL's 64-byte name limit. Mutineer creates the
   database, loads `schema.rb` or `structure.sql`, and copies rows once at
   the start. Triggers from the schema do not fire on the copied rows.
+  Mutineer creates them again after the copy.
   A second run cannot drop a database another live run holds.
   That work uses the TLS and timeout settings from the database config.
   MariaDB is not tested. MySQL 5.7 is not supported. The worker databases

@@ -1228,7 +1228,7 @@ module Mutineer
     #
     # @param conn [Mysql2::Client, Trilogy]
     # @param dest [String]
-    # @return [Array<Hash>] `:sql`, `:sql_mode` and `:collation` for each trigger.
+    # @return [Array<Hash>] `:name`, `:sql`, `:sql_mode` and `:collation` for each trigger.
     def self.drop_mysql_triggers(conn, dest)
       rows = mysql_rows(conn, <<~SQL)
         SELECT TRIGGER_NAME AS trigger_name
@@ -1246,14 +1246,14 @@ module Mutineer
       # changes bytes on replay.
       triggers = rows.map do |row|
         name = row["trigger_name"].to_s
-        qualified = "#{quote_mysql_ident(dest)}.#{quote_mysql_ident(name)}"
-        shown = mysql_rows(conn, "SHOW CREATE TRIGGER #{qualified}").first
+        shown = mysql_rows(conn, "SHOW CREATE TRIGGER #{quote_mysql_ident(dest)}.#{quote_mysql_ident(name)}").first
         raise "cannot read trigger #{name} on #{dest}" unless shown
 
-        mysql_exec(conn, "DROP TRIGGER #{qualified}")
-        { sql: shown["sql original statement"].to_s, sql_mode: shown["sql_mode"].to_s,
+        { name: name, sql: shown["sql original statement"].to_s, sql_mode: shown["sql_mode"].to_s,
           collation: shown["collation_connection"].to_s }
       end
+      # Every definition is saved before the first drop.
+      triggers.each { |trigger| mysql_exec(conn, "DROP TRIGGER #{quote_mysql_ident(dest)}.#{quote_mysql_ident(trigger[:name])}") }
       mysql_exec(conn, "SET SESSION sql_mode = #{mysql_quote_string(conn, sql_mode)}")
       triggers
     end
@@ -1262,12 +1262,14 @@ module Mutineer
     # with its own sql_mode and connection collation, which decide how MySQL
     # reads its body. The CREATE text names no database, so this session
     # switches to `dest`. The sql_mode and collation go back to their values at
-    # the start of this call. The character set stays utf8mb4.
+    # the start of this call. The character set stays utf8mb4. A failed create
+    # names the trigger, for example when the DEFINER account needs SET_USER_ID.
     #
     # @param conn [Mysql2::Client, Trilogy]
     # @param dest [String]
     # @param triggers [Array<Hash>]
     # @return [void]
+    # @raise [RuntimeError] when MySQL refuses to create a trigger.
     def self.recreate_mysql_triggers(conn, dest, triggers)
       return if triggers.empty?
 
@@ -1276,6 +1278,8 @@ module Mutineer
       triggers.each do |trigger|
         mysql_exec(conn, mysql_session_modes_sql(conn, trigger[:sql_mode], trigger[:collation]))
         mysql_exec(conn, trigger[:sql])
+      rescue StandardError => e
+        raise "cannot recreate trigger #{trigger[:name]} on #{dest}: #{e.message}"
       end
       mysql_exec(conn, mysql_session_modes_sql(conn, saved["sql_mode"], saved["collation"]))
     end
