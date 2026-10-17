@@ -165,7 +165,7 @@ class DaemonClientTest < Minitest::Test
           Process.kill(:KILL, child) rescue nil # rubocop:disable Style/RescueModifier
           # Killed inside `load`, the child leaves its mutant file in app/models,
           # and a later Rails boot fails on the name (#250).
-          Dir.glob(File.join(APP, "app/models", "mutineer_daemon*-#{child}-*.rb")).each { |f| File.unlink(f) }
+          Dir.glob(File.join(APP, "app/models", "{.,}mutineer_daemon*-#{child}-*.rb")).each { |f| File.unlink(f) }
         end
       end
     end

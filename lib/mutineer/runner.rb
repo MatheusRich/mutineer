@@ -129,7 +129,7 @@ module Mutineer
 
       jobs, ignored_results, extras[:unscoped_mutants] = JobPlan.scope_since(jobs, ignored_results, source_map, config)
 
-      # Whole-file reload writes mutineer_mutant*.rb into each source dir (so
+      # Whole-file reload writes .mutineer_mutant*.rb into each source dir (so
       # require_relative resolves). A SIGKILL'd child skips the tempfile's
       # ensure-unlink, orphaning it. `ensure` is unreliable vs SIGKILL, so the
       # PARENT sweeps each source dir before and after the run. Orphans are

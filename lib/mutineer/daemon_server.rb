@@ -51,8 +51,10 @@ module Mutineer
     # Poll interval (seconds) for the per-fork deadline wait loop.
     POLL = 0.02
     # Basename glob for a mutant file written beside a source file.
-    # Tempfile puts hyphens in the name, so it is not a constant name.
-    DAEMON_TEMP_BASENAME = "mutineer_daemon*.rb"
+    # Tempfile puts hyphens in the name, so it is not a constant name. The
+    # leading dot hides a new file from Zeitwerk (#253); a file an older
+    # version left behind has none, so the glob matches both.
+    DAEMON_TEMP_BASENAME = "{.,}mutineer_daemon*.rb"
 
     # Skips daemon mutant files when Zeitwerk scans an autoload directory.
     # The boot sweep keeps a file another process still holds. That file would
@@ -403,11 +405,14 @@ module Mutineer
       # neighbours. Writing it to the tmpdir would LoadError on such files and
       # score a spurious `error` that diverges from the in-process path. The
       # Zeitwerk hazard (a stray `.rb` in an autoload dir) is handled by the
-      # boot/timeout `sweep_temps`, not by relocating the file. Same path for
-      # reload (whole file) and redefine (wrapped snippet).
+      # boot/timeout `sweep_temps`, not by relocating the file. The leading dot
+      # hides the file from Zeitwerk, which skips hidden files: loading it can be
+      # the first time Zeitwerk scans a namespace directory, and a parallel
+      # worker's file may sit there too (#253). Same path for reload (whole file)
+      # and redefine (wrapped snippet).
       def apply_payload(payload)
         dir = File.dirname(File.expand_path(payload.fetch("source_file")))
-        Tempfile.create(["mutineer_daemon", ".rb"], dir) do |f|
+        Tempfile.create([".mutineer_daemon", ".rb"], dir) do |f|
           # Held until this block ends, including SIGKILL (the kernel drops it).
           # Another run's sweep sees the lock and does not delete the file.
           f.flock(File::LOCK_EX) rescue nil # rubocop:disable Style/RescueModifier
