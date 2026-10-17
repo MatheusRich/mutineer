@@ -103,7 +103,11 @@ All notable changes to this project are documented here. The format is based on
   The next Rails boot then failed on the file name. Each daemon run now
   cleans up again when it ends or stops early. It waits up to 1.5 seconds
   for the child to go. A file whose owner still runs after that stays
-  until the next daemon run removes it.
+  until the next daemon run removes it. On Linux, a file whose owner is a
+  zombie (in a container whose pid 1 does not reap it) is now removed.
+  With `--jobs N`, an error in one worker stops the others after their
+  current mutant, and a Ctrl-C quits every worker daemon before the run
+  ends.
 - **SimpleCov in a test helper no longer breaks every mutant under
   `--rails` or `--boot` (#248).** After the coverage map is built, mutineer
   pauses Ruby's coverage (#228). SimpleCov saw the paused coverage as off and
