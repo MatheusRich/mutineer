@@ -1223,6 +1223,8 @@ module Mutineer
     # and older open utf8mb3, which turns a 4-byte character into "?". Under
     # ANSI_QUOTES, MySQL quotes the names with double quotes, which the
     # trigger's own sql_mode may not read. Backticks read in every sql_mode.
+    # The session stays on utf8mb4, so {recreate_mysql_triggers} sends the
+    # text back unchanged.
     #
     # @param conn [Mysql2::Client, Trilogy]
     # @param dest [String]
@@ -1239,10 +1241,9 @@ module Mutineer
       sql_mode = mysql_rows(conn, "SELECT @@SESSION.sql_mode AS sql_mode").first["sql_mode"]
       mysql_exec(conn, "SET NAMES utf8mb4")
       mysql_exec(conn, "SET SESSION sql_mode = ''")
-      # ponytail: the text comes back as utf8mb4. In a trigger saved with
-      # another client charset, a _binary or _latin1 literal that holds
-      # non-ASCII bytes changes bytes. Replay the raw bytes with the trigger's
-      # character_set_client if that case appears.
+      # Limit: the text comes back as utf8mb4. In a trigger saved with another
+      # client charset, a _binary or _latin1 literal that holds non-ASCII bytes
+      # changes bytes on replay.
       triggers = rows.map do |row|
         name = row["trigger_name"].to_s
         qualified = "#{quote_mysql_ident(dest)}.#{quote_mysql_ident(name)}"
@@ -1260,7 +1261,8 @@ module Mutineer
     # Create the triggers {drop_mysql_triggers} dropped. Each one is created
     # with its own sql_mode and connection collation, which decide how MySQL
     # reads its body. The CREATE text names no database, so this session
-    # switches to `dest`. The session's sql_mode and collation are put back.
+    # switches to `dest`. The sql_mode and collation go back to their values at
+    # the start of this call. The character set stays utf8mb4.
     #
     # @param conn [Mysql2::Client, Trilogy]
     # @param dest [String]
