@@ -280,12 +280,15 @@ class RunnerTest < Minitest::Test
     assert_equal :no_coverage, selection(source, "false", {}, load_lines: [2])[1].status
   end
 
-  # #254: for a `:maybe` selection only a kill is new; every other result is
-  # no_coverage with no --matrix row, as before. Any other selection is untouched.
+  # #254: for a `:maybe` selection only a kill is new, and its --matrix row lists
+  # only the killers as having run it; every other result is no_coverage with no
+  # row, as before. Any other selection is untouched.
   def test_selection_verdict_keeps_only_a_kill_of_a_maybe_mutant
     row = Mutineer::Kills.new(killed_by: [], ran: ["t_test.rb"], complete: true)
-    killed = Mutineer::Result.new(status: :killed, kills: row)
-    assert_same killed, Mutineer::JobPlan.selection_verdict(:maybe, killed)
+    killer = Mutineer::Kills.new(killed_by: ["k_test.rb"], ran: ["k_test.rb", "t_test.rb"], complete: true)
+    killed = Mutineer::JobPlan.selection_verdict(:maybe, Mutineer::Result.new(status: :killed, kills: killer))
+    assert_equal [:killed, ["k_test.rb"], ["k_test.rb"]], [killed.status, killed.kills.killed_by, killed.kills.ran]
+    assert_predicate Mutineer::JobPlan.selection_verdict(:maybe, Mutineer::Result.killed), :killed?
     %i[survived error timeout].each do |status|
       result = Mutineer::JobPlan.selection_verdict(:maybe, Mutineer::Result.new(status: status, kills: row))
       assert_equal [:no_coverage, nil], [result.status, result.kills], status

@@ -115,8 +115,9 @@ All notable changes to this project are documented here. The format is based on
   no survivor or error is added, but a score can rise with no test change.
   This also applies to a later `when` condition, the value of `x rescue y`,
   `&.` arguments and an `||=` value on a later line, and to `--daemon`. A
-  branch of a ternary or `if`, or the body of `x if c`, on a later line still
-  stays `no_coverage`: Ruby counts a line Mutineer cannot tie to it.
+  branch of a ternary or `if`, and the body of `x if c`, keep the verdict they
+  had before. In a `--matrix` run, a kill of such a mutant lists only its
+  killers as tests that ran it.
 
 ## [1.6.0] - 2026-10-08
 
