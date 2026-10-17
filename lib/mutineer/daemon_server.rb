@@ -57,7 +57,8 @@ module Mutineer
     DAEMON_TEMP_BASENAME = "{.,}mutineer_daemon*.rb"
 
     # Skips daemon mutant files when Zeitwerk scans an autoload directory.
-    # The boot sweep keeps a file another process still holds. That file would
+    # The boot sweep keeps a file another process still holds. Zeitwerk skips a
+    # hidden one (#253), but one an older version wrote has no dot, and it would
     # stop the next boot, because its name is not a constant.
     module DaemonTempIgnore
       # @return [void]
@@ -160,8 +161,9 @@ module Mutineer
           Coverage.start(lines: true, methods: true)
         end
         # Clear a mutant tempfile a prior SIGKILLed child orphaned in a source
-        # dir BEFORE the app boots. Zeitwerk would otherwise choke on the
-        # tempfile's non-constant name during autoload setup. A file another
+        # dir BEFORE the app boots. Zeitwerk skips a hidden one, but it would
+        # choke on the non-constant name of one an older version wrote without
+        # the dot (#253). A file another
         # live process still owns stays: this runs before the database lock,
         # so a refused boot must not delete that run's mutant. The kept file
         # is hidden from Zeitwerk instead.
@@ -318,7 +320,7 @@ module Mutineer
         # failure. Both leave the slot unready so the next fork seeds again.
         @slot_ready[worker] = true if first_use && %w[killed survived].include?(verdict)
         # A SIGKILLed timeout child skipped its Tempfile unlink. Sweep the orphan
-        # so it cannot outlive the run or trip Zeitwerk on a later fork.
+        # so it cannot outlive the run.
         sweep_temps if verdict == "timeout"
         { "id" => req["id"], "verdict" => verdict }
       end
@@ -404,12 +406,11 @@ module Mutineer
       # `require_relative` in the mutated source resolves against its real
       # neighbours. Writing it to the tmpdir would LoadError on such files and
       # score a spurious `error` that diverges from the in-process path. The
-      # Zeitwerk hazard (a stray `.rb` in an autoload dir) is handled by the
-      # boot/timeout `sweep_temps`, not by relocating the file. The leading dot
-      # hides the file from Zeitwerk, which skips hidden files: loading it can be
-      # the first time Zeitwerk scans a namespace directory, and a parallel
-      # worker's file may sit there too (#253). Same path for reload (whole file)
-      # and redefine (wrapped snippet).
+      # leading dot keeps the file away from Zeitwerk, which skips hidden files:
+      # loading it can be the first time Zeitwerk scans a namespace directory,
+      # and a parallel worker's file may sit there too (#253). `sweep_temps` only
+      # removes orphans and never touches a live file. Same path for reload
+      # (whole file) and redefine (wrapped snippet).
       def apply_payload(payload)
         dir = File.dirname(File.expand_path(payload.fetch("source_file")))
         Tempfile.create([".mutineer_daemon", ".rb"], dir) do |f|

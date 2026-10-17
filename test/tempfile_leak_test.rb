@@ -30,7 +30,6 @@ class TempfileLeakTest < Minitest::Test
     end
   end
 
-  # A full normal run must leave no mutant file in the source dir.
   # The sweep removes a file an older version left (no dot) and a new hidden one.
   def test_sweep_removes_hidden_and_older_mutant_files
     Dir.mktmpdir do |dir|
@@ -41,6 +40,7 @@ class TempfileLeakTest < Minitest::Test
     end
   end
 
+  # A full normal run must leave no mutant file in the source dir.
   def test_normal_run_leaves_no_orphans
     fixtures_dir = File.expand_path("fixtures", __dir__)
     config = Mutineer::Config.new(

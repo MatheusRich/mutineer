@@ -106,7 +106,8 @@ All notable changes to this project are documented here. The format is based on
   each other's files. Now the temp files are hidden: `.mutineer_mutant*.rb`
   and `.mutineer_daemon*.rb`. Zeitwerk skips hidden files, in every loader.
   The cleanup sweeps still remove a file an older version left without the
-  dot. Eager loading, the default on CI, scans every directory at boot, so it
+  dot, and an in-process run now sweeps before the app boots, so such a file
+  cannot stop Zeitwerk during the boot. Eager loading, the default on CI, scans every directory at boot, so it
   never hit the error.
 
 ## [1.6.0] - 2026-10-08
