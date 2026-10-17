@@ -253,7 +253,7 @@ The `--daemon` path loads `config/environment` itself, so Spring does not start 
 A wrapper that sets `DISABLE_SPRING` again wins, same as `PARALLEL_WORKERS`.
 
 Bootsnap checks its compile cache by file path, size, and modification time in whole seconds.
-It does not compare the file content.
+When the size and the time match, it uses the cached code without reading the file content.
 The in-process and `--daemon` paths load each mutant from a new file, so the cache cannot mix them up.
 `--test-command` rewrites the source file in place.
 Two mutants of the same size, written in the same second, can then load the first one's cached code.
