@@ -280,6 +280,28 @@ class RunnerTest < Minitest::Test
     assert_equal :no_coverage, selection(source, "false", {}, load_lines: [2])[1].status
   end
 
+  # #254: under redefine, a mutant whose owner cannot be named is unplaceable; a
+  # :maybe one stays no_coverage, as it was before #254.
+  def test_an_unplaceable_maybe_mutant_stays_no_coverage
+    Dir.mktmpdir do |dir|
+      src = File.join(dir, "x.rb")
+      File.write(src, "def f(a, b)\n  a + b\nend\n")
+      def_node = Mutineer::Parser.parse_string(File.read(src)).value.statements.body.first
+      subject = Mutineer::Subject.new(file: src, namespace: [], name: :f, singleton: false, owner_unknown: true,
+                                      def_node: def_node)
+      plus = File.read(src).index("a + b") + 2
+      mutation = Mutineer::Mutation.new(start_offset: plus, end_offset: plus + 1, replacement: "-",
+                                        operator: :arithmetic)
+      statuses = %i[maybe run].map do |kind|
+        Mutineer::JobPlan.stub(:coverage_selection, [kind, [File.join(dir, "x_test.rb")]]) do
+          Mutineer::Runner.run(mutation, source_file: src, subject: subject, strategy: "redefine").status
+        end
+      end
+
+      assert_equal %i[no_coverage unplaceable], statuses
+    end
+  end
+
   # #254: for a `:maybe` selection only a kill is new, and its --matrix row lists
   # only the killers as having run it; every other result is no_coverage with no
   # row, as before. Any other selection is untouched.
