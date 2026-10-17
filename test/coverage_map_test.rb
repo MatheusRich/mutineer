@@ -736,13 +736,14 @@ class CoverageMapTest < Minitest::Test
     hang = File.join(Dir.mktmpdir, "hang_test.rb")
     File.write(hang, "sleep 30\n")
     map = nil
-    capture_subprocess_io do
+    _, err = capture_subprocess_io do
       map = Mutineer::CoverageMap.new(
         source_paths: [CALC], test_paths: [STRONG_TEST, hang],
         cache_dir: Dir.mktmpdir("mutineer-cache"), project_root: ROOT, capture_timeout: 3
       ).build_or_load
     end
     assert_includes map.failed_test_files.map { |f| File.basename(f) }, "hang_test.rb"
+    assert_includes err, "timed out after 3s"
     refute_empty map.tests_for(CALC, line_of("a + b")), "good test still recorded"
   end
 
