@@ -3,6 +3,7 @@
 require "json"
 require "tempfile"
 require_relative "child_stdout"
+require_relative "child_coverage"
 require_relative "orphan_guard"
 
 module Mutineer
@@ -26,17 +27,19 @@ module Mutineer
   # Protocol (one JSON object per line, both directions):
   #   boot in  : {"cmd":"boot","project_root":"...","boot":"config/environment","require_paths":[...],
   #               "load_paths":["test"],"framework":"minitest","rails":true,"schema":"db/schema.rb"}
-  #   ready out: {"ready":true,"ruby":"3.3.6"}   (or {"ready":false,"error":"..."} then exit)
+  #   ready out: {"ready":true,"ruby":"3.3.6","database_count":1}
+  #              (or {"ready":false,"error":"..."} then exit)
+  #   provision: {"cmd":"provision","slots":N} -> {"ok":true} or {"ok":false,"error":"..."}
   #   run  in  : {"id":N,"worker":I,"payload":{"code":"<ruby>","source_file":"app/models/order.rb"},
   #               "tests":["test/models/order_test.rb"],"timeout":30}
   #   verdict  : {"id":N,"verdict":"survived"|"killed"|"error"|"timeout"}
   #   quit in  : {"cmd":"quit"}
   #
   # Worker isolation: when the app is Rails, each fork is routed to its own
-  # database `<db>-<worker>` via {RailsWorkerDb} BEFORE any test loads, so
-  # concurrent workers cannot clobber each other's transactional fixtures.
-  # `worker` defaults to 0 (serial). SQLite this pass; Postgres provisioning is
-  # not yet implemented.
+  # database via {RailsWorkerDb} BEFORE any test loads, so concurrent workers
+  # cannot clobber each other's transactional fixtures. `worker` defaults to 0
+  # (serial). SQLite copies a file per slot. Postgres and MySQL use
+  # `<base>-mutineer-<w>`, created once before the worker daemons start.
   #
   # Verdict mapping: child exit 0=survived (suite passed), 1=killed (suite
   # failed), 2=error (child raised AROUND the test: load, boot, or worker-DB
@@ -47,6 +50,26 @@ module Mutineer
   module DaemonServer
     # Poll interval (seconds) for the per-fork deadline wait loop.
     POLL = 0.02
+    # Basename glob for a mutant file written beside a source file.
+    # Tempfile puts hyphens in the name, so it is not a constant name. The
+    # leading dot hides a new file from Zeitwerk (#253); a file an older
+    # version left behind has none, so the glob matches both.
+    DAEMON_TEMP_BASENAME = "{.,}mutineer_daemon*.rb"
+
+    # Skips daemon mutant files when Zeitwerk scans an autoload directory.
+    # The boot sweep keeps a file another process still holds. Zeitwerk skips a
+    # hidden one (#253), but one an older version wrote has no dot, and it would
+    # stop the next boot, because its name is not a constant.
+    module DaemonTempIgnore
+      # @return [void]
+      def setup
+        dirs = Array(Mutineer::DaemonServer.instance_variable_get(:@source_dirs))
+        dirs.each do |dir|
+          ignore(File.join(dir, Mutineer::DaemonServer::DAEMON_TEMP_BASENAME))
+        end
+        super
+      end
+    end
 
     class << self
       # Serve the protocol on the given IO pair (defaults to stdio). Returns on quit.
@@ -66,7 +89,7 @@ module Mutineer
         return if boot_line.nil? # client vanished before boot
 
         boot!(JSON.parse(boot_line.strip))
-        output.puts(JSON.generate("ready" => true, "ruby" => RUBY_VERSION))
+        output.puts(JSON.generate("ready" => true, "ruby" => RUBY_VERSION, "database_count" => database_count))
         output.flush
 
         input.each_line do |line|
@@ -83,6 +106,14 @@ module Mutineer
             next
           end
           break if req["cmd"] == "quit"
+
+          # Create worker databases before coverage forks or mutant forks.
+          # The first daemon does this. A restarted worker daemon does not.
+          if req["cmd"] == "provision"
+            output.puts(JSON.generate(provision_slots(req["slots"])))
+            output.flush
+            next
+          end
 
           # Build the coverage map app-side and ship it to the tool, which then
           # selects covering tests per mutant. One-shot control message.
@@ -129,11 +160,17 @@ module Mutineer
           require "coverage"
           Coverage.start(lines: true, methods: true)
         end
-        # Clear any mutant tempfile a prior SIGKILLed timeout child orphaned in a
-        # source dir BEFORE the app boots. Zeitwerk would otherwise choke on the
-        # tempfile's non-constant name during autoload setup.
+        # Clear a mutant tempfile a prior SIGKILLed child orphaned in a source
+        # dir BEFORE the app boots. Zeitwerk skips a hidden one, but it would
+        # choke on the non-constant name of one an older version wrote without
+        # the dot (#253). A file another
+        # live process still owns stays: this runs before the database lock,
+        # so a refused boot must not delete that run's mutant. The kept file
+        # is hidden from Zeitwerk instead.
         sweep_temps
+        install_zeitwerk_ignore! if cfg["rails"]
         require File.expand_path(cfg["boot"]) if cfg["boot"]
+        @zeitwerk_trace&.disable
         # The --require files, after the boot as in-process (Runner.execute), so
         # the coverage peek sees what they ran at load.
         Array(cfg["require_paths"]).each { |f| require File.expand_path(f) }
@@ -149,18 +186,57 @@ module Mutineer
       # Load the per-worker DB adapter app-side (sibling gem file, by relative path
       # so it bypasses the app bundle, like this daemon itself). No-op unless the
       # app has ActiveRecord. Records the adapter + schema path so each fork can
-      # route to its own database. SQLite-only this pass; a non-SQLite config
-      # raises in the fork and reads as `error`, never a mis-routed verdict.
+      # route to its own database.
+      #
+      # `db_role` "prepare" waits for a provision command (the first daemon).
+      # "worker" only takes the shared lock (a worker daemon, including a
+      # respawn). Anything else provisions now, which is what a direct client
+      # that never sends the command needs. SQLite provisioning does nothing.
       def setup_worker_db(cfg)
         require_relative "rails_worker_db"
         @worker_db = RailsWorkerDb.available? ? RailsWorkerDb : nil
         schema = cfg["schema"] && File.expand_path(cfg["schema"])
         @schema_path = schema if schema && File.exist?(schema)
-        # Each worker slot is seeded once, on first use (not every mutant fork).
+        # Each SQLite slot is seeded once, on first use (not every mutant fork).
+        # Postgres and MySQL slots are copied at provision time, so this flag is unused there.
         @slot_ready = {}
+        return unless @worker_db
+
+        case cfg["db_role"]
+        when "prepare"
+          nil
+        when "worker"
+          @worker_db.prepare_worker!
+        else
+          @worker_db.provision(cfg.fetch("slots", 2).to_i)
+        end
       rescue LoadError => e
         @errio.puts("[daemon] worker-DB routing unavailable: #{e.message}")
         @worker_db = nil
+      end
+
+      # Database configs in the booted test environment. 1 when the app has no
+      # worker-DB adapter. The tool uses this to force a single worker.
+      #
+      # @return [Integer]
+      def database_count
+        return 1 unless @worker_db
+
+        @worker_db.database_count
+      rescue StandardError
+        1
+      end
+
+      # Run {RailsWorkerDb.provision} and report success or the cause. A failure
+      # stays on this reply. It does not become a mutant verdict.
+      #
+      # @param slots [Integer, String]
+      # @return [Hash]
+      def provision_slots(slots)
+        @worker_db.provision(Integer(slots)) if @worker_db
+        { "ok" => true }
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        { "ok" => false, "error" => "#{e.class}: #{e.message}" }
       end
 
       # Build the coverage map app-side (Coverage was started at boot) and return
@@ -225,6 +301,7 @@ module Mutineer
           code =
             begin
               ChildStdout.silence
+              ChildCoverage.allow_start
               close_protocol
               # Route THIS fork at its own worker database before any test loads.
               # A routing failure raises here and is scored `error`, never a false verdict.
@@ -243,17 +320,46 @@ module Mutineer
         # failure. Both leave the slot unready so the next fork seeds again.
         @slot_ready[worker] = true if first_use && %w[killed survived].include?(verdict)
         # A SIGKILLed timeout child skipped its Tempfile unlink. Sweep the orphan
-        # so it cannot outlive the run or trip Zeitwerk on a later fork.
+        # so it cannot outlive the run.
         sweep_temps if verdict == "timeout"
         { "id" => req["id"], "verdict" => verdict }
       end
 
+      # Hide kept mutant files from Zeitwerk before the app builds its loaders.
+      # The loader class may not exist yet. Watch for it, then stop watching.
+      #
+      # @return [void]
+      def install_zeitwerk_ignore!
+        if defined?(Zeitwerk::Loader)
+          prepend_daemon_temp_ignore
+          return
+        end
+
+        @zeitwerk_trace = TracePoint.new(:end) do |event|
+          next unless event.self.is_a?(Class) && event.self.name == "Zeitwerk::Loader"
+
+          @zeitwerk_trace.disable
+          prepend_daemon_temp_ignore
+        end
+        @zeitwerk_trace.enable
+      end
+
+      # @return [void]
+      def prepend_daemon_temp_ignore
+        return if Zeitwerk::Loader.ancestors.include?(DaemonTempIgnore)
+
+        Zeitwerk::Loader.prepend(DaemonTempIgnore)
+      end
+
       # Remove orphaned mutant tempfiles from the source dirs (parent-side; the
       # SIGKILL path cannot run the child's ensure). Mirrors JobPlan.sweep_orphans.
+      # Skips a file another process still owns ({OrphanGuard.mutant_file_in_use?}).
       def sweep_temps
         @source_dirs.to_a.each do |dir|
-          Dir.glob(File.join(dir, "mutineer_daemon*.rb")).each do |f|
-            File.unlink(f) rescue nil # rubocop:disable Style/RescueModifier
+          Dir.glob(File.join(dir, DAEMON_TEMP_BASENAME)).each do |path|
+            next if OrphanGuard.mutant_file_in_use?(path)
+
+            File.unlink(path) rescue nil # rubocop:disable Style/RescueModifier
           end
         end
       end
@@ -300,12 +406,17 @@ module Mutineer
       # `require_relative` in the mutated source resolves against its real
       # neighbours. Writing it to the tmpdir would LoadError on such files and
       # score a spurious `error` that diverges from the in-process path. The
-      # Zeitwerk hazard (a stray `.rb` in an autoload dir) is handled by the
-      # boot/timeout `sweep_temps`, not by relocating the file. Same path for
-      # reload (whole file) and redefine (wrapped snippet).
+      # leading dot keeps the file away from Zeitwerk, which skips hidden files:
+      # loading it can be the first time Zeitwerk scans a namespace directory,
+      # and a parallel worker's file may sit there too (#253). `sweep_temps` only
+      # removes orphans and never touches a live file. Same path for reload
+      # (whole file) and redefine (wrapped snippet).
       def apply_payload(payload)
         dir = File.dirname(File.expand_path(payload.fetch("source_file")))
-        Tempfile.create(["mutineer_daemon", ".rb"], dir) do |f|
+        Tempfile.create([".mutineer_daemon", ".rb"], dir) do |f|
+          # Held until this block ends, including SIGKILL (the kernel drops it).
+          # Another run's sweep sees the lock and does not delete the file.
+          f.flock(File::LOCK_EX) rescue nil # rubocop:disable Style/RescueModifier
           f.write(payload.fetch("code"))
           f.flush
           load f.path

@@ -59,10 +59,15 @@ class DaemonClientTest < Minitest::Test
   # A payload that hangs on load is SIGKILLed at the deadline → timeout (fast).
   def test_hung_payload_times_out_and_daemon_recovers
     with_client do |client|
+      temps = -> { Dir.glob(File.join(APP, "app/models", Mutineer::DaemonBackend::DAEMON_TEMP_GLOB)) }
+      before = temps.call
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       assert_equal "timeout", run_payload(client, 1, "sleep 999", timeout: 1)
       elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
       assert_operator elapsed, :<, 10, "should kill near the 1s deadline"
+      # #250: the SIGKILLed child skipped its own unlink; a file left in
+      # app/models breaks the app's next Zeitwerk boot.
+      assert_empty temps.call - before, "a timed-out mutant must not leave its file"
 
       # Daemon serves the next request normally — the loop was not wedged.
       assert_equal "survived", run_payload(client, 2, ORIGINAL)
@@ -101,6 +106,39 @@ class DaemonClientTest < Minitest::Test
     end
   end
 
+  # A second boot must start while another process still holds a mutant file
+  # in an autoload directory. The sweep leaves that file alone. Its hyphenated
+  # name must not stop Zeitwerk.
+  def test_a_live_mutant_file_does_not_stop_the_next_boot
+    holder = nil
+    path = nil
+    dead = fork { exit!(0) }
+    Process.waitpid(dead)
+    path = File.join(APP, "app/models", "mutineer_daemon20200101-#{dead}-live.rb")
+    holder = fork do
+      File.open(path, "w") do |file|
+        file.write("module LiveMutantFile; end\n")
+        file.flush
+        file.flock(File::LOCK_EX)
+        sleep 60
+      end
+    end
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
+    sleep 0.01 until File.exist?(path) || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+    assert File.exist?(path), "the live mutant file was not created"
+
+    with_client do |client|
+      assert_equal "survived", run_payload(client, 1, ORIGINAL)
+    end
+    assert File.exist?(path), "boot must not delete a file another process holds"
+  ensure
+    if holder
+      Process.kill(:KILL, holder) rescue nil # rubocop:disable Style/RescueModifier
+      Process.waitpid(holder) rescue nil # rubocop:disable Style/RescueModifier
+    end
+    File.unlink(path) if path && File.exist?(path)
+  end
+
   # #102: a mutant fork must not hold the protocol channel open. If the daemon
   # dies while a child still runs, the client sees EOF at once and scores
   # `error`, rather than waiting for the orphaned child to finish.
@@ -122,7 +160,13 @@ class DaemonClientTest < Minitest::Test
         # Includes the respawn's Rails boot; without the fix this is ~60s.
         assert_operator elapsed, :<, 30, "the orphaned child must not hold the protocol pipe"
       ensure
-        Process.kill(:KILL, File.read(marker).to_i) rescue nil # rubocop:disable Style/RescueModifier
+        child = File.read(marker).to_i if File.size?(marker)
+        if child
+          Process.kill(:KILL, child) rescue nil # rubocop:disable Style/RescueModifier
+          # Killed inside `load`, the child leaves its mutant file in app/models,
+          # and a later Rails boot fails on the name (#250).
+          Dir.glob(File.join(APP, "app/models", "{.,}mutineer_daemon*-#{child}-*.rb")).each { |f| File.unlink(f) }
+        end
       end
     end
   end

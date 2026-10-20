@@ -6,6 +6,96 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **Reasons on ignored mutants.** Text after `--` on
+  `# mutineer:disable-line`, and a `.mutineer.yml` `ignore:` mapping
+  (`id` plus `reason`), is stored on the ignored mutant. The JSON report
+  (`schema_version` 1.8) and the HTML report show it. A mapping with no
+  `id`, or with an unknown key, warns. Mutineer 1.7 is the first version
+  that reads a mapping. An older version matches no mutant to a mapping
+  and does not warn, so the mutant it names is not ignored. Upgrade
+  every gate that reads the file before you add a mapping.
+  `mutineer migrate` rewrites the old id inside a mapping and keeps its
+  reason.
+- **`mutineer triage`.** It prints `ignore:` mapping entries for survivors
+  in a JSON report. `--reason` is required. Pass `--all` or `--id`. It
+  does not edit files.
+- **Equivalent-skip page.** The docs list every built-in chain-link skip
+  and the endless-range skip, and why each one is equivalent.
+- **Postgres worker databases for `--rails --daemon`.** Each worker gets
+  `<base>-mutineer-<N>`, copied from the test database before mutants run.
+  A second run cannot drop a database another live run holds. An app with
+  more than one database config runs one worker and says so once.
+  The worker databases stay after the run.
+- **MySQL 8 worker databases for Minitest on `--rails --daemon`.** Each worker gets
+  `<base>-mutineer-<N>` on `mysql2` or `trilogy`, with the base shortened to fit
+  MySQL's 64-byte name limit. Mutineer creates the
+  database, loads `schema.rb` or `structure.sql`, and copies rows once at
+  the start. Triggers from the schema do not fire on the copied rows.
+  Mutineer creates them again after the copy.
+  A second run cannot drop a database another live run holds.
+  That work uses the TLS and timeout settings from the database config.
+  MariaDB is not tested. MySQL 5.7 is not supported. The worker databases
+  stay after the run.
+- **`mutineer migrate`.** It rewrites old-format ids in `.mutineer.yml`
+  `ignore:` to the current ids. It keeps comments and every other line.
+  One old id that matches several mutants becomes every new id. An id that
+  matches nothing stays, and the command exits 1. A block scalar under
+  `ignore:` is not supported: the command exits 2 and does not change the
+  file. `--dry-run` prints each change and writes nothing. It does not
+  rewrite a baseline. Generate a new baseline with `--format json`. An
+  old-id warning names `mutineer migrate` and says that this becomes an
+  error in Mutineer 2.0. The baseline warning says to generate a new
+  baseline with `--format json`.
+- **`mutineer init`.** It writes a commented `.mutineer.yml` with the default
+  operators. `since` stays commented, so the first run is a full scan.
+  `init --rails` also sets `rails: true` and prints the first run command.
+  An existing file is kept unless you pass `--force`.
+- **Rails rollout guide.** The page walks from one model, to a report-only CI
+  job, to a `--since` and `--baseline` pull request gate, to `--threshold`
+  on chosen folders. It has a GitHub Actions recipe and a GitLab CI recipe.
+- **A production-ready section and a stability contract.** The README opens
+  with a support matrix for Ruby, database, framework, and parallelism.
+  `STABILITY.md` lists what a release keeps and what 2.0 will change.
+  `SECURITY.md`, `CONTRIBUTING.md`, and GitHub issue forms are new.
+  The docs home page takes the same section from the README at site build.
+- **`--allow-empty` and `allow_empty:`.** A run with no mutants now warns
+  that Mutineer 2.0 will fail it, unless `--allow-empty` marks it as expected.
+  A `--since` run whose changes hold no mutants does not warn: it says the
+  changes hold nothing to test. A `--since` run with no mutants even before
+  scoping still warns. The exit code does not change in 1.x.
+- **`--no-daemon`.** It beats a `.mutineer.yml` `daemon: true` for one run,
+  like `--no-fail-fast`. A Minitest `--rails` run without a `daemon` value now
+  prints a notice that 2.0 uses `--daemon` by default for `--rails`;
+  `--no-daemon` (or `daemon: false`) keeps the run serial and stops the
+  notice.
+- **"Did you mean" hints.** Unknown names in `--operators`, in
+  `.mutineer.yml` `operators:` and keys, and in `# mutineer:disable-line`
+  markers get the closest valid name. The `.mutineer.yml` warnings also say
+  that 2.0 makes them errors.
+
+### Changed
+
+- **Rails test workers stay off during a mutant run.** Mutineer sets
+  `PARALLEL_WORKERS` to `1` for in-process, `--daemon`, and `--test-command`
+  runs. A value you already set is replaced, and Mutineer prints one line.
+  The coverage cache stores the `PARALLEL_WORKERS` value, so a cache from an
+  older version rebuilds once. `--test-command` also sets `DISABLE_SPRING=1`.
+  The README explains `parallelize`, Bootsnap, and Redis after a fork.
+- **`--test-command` exit codes 126 and 127 are scored `error`, not
+  `killed`.** A wrapper that could not start the suite ran no test. Under
+  `--threshold`, such a run can now score lower or fail the no-verdict limit,
+  where before it passed on false kills.
+- **A run with errored mutants and no `--threshold` says so.** Errors are not
+  in the score, so they do not fail the run; the message says what
+  `--threshold` would enforce.
+- **`--since` also narrows suppressed mutants.** A scoped report lists only
+  `ignored` mutants on changed lines, as `--dry-run --since` already did.
+- **The empty-run message moved from the human report to one stderr warning
+  for every format.** "No mutations generated" is gone. An empty `--since`
+  run prints "nothing to test in the changes since REF" instead.
+
 ### Fixed
 
 - **An RSpec run that fails only on an error outside examples scores the
@@ -21,6 +111,88 @@ All notable changes to this project are documented here. The format is based on
   Minitest and `--daemon` already score a test file that raises at load as
   `errored`. `--test-command` sees only the exit status and still scores it
   `killed`.
+
+- **A Rails daemon boots again while a mutant file is still open.**
+  The file stays when another process holds it. The next boot skips
+  that file name instead of stopping.
+- **A daemon crash no longer leaves a mutant file in your source folder
+  (#250).** When a daemon dies during a mutant, its child dies a moment
+  later. The new daemon cleaned up before that, so the child's file stayed.
+  The next Rails boot then failed on the file name. Each daemon run now
+  cleans up again when it ends or stops early. It waits up to 1.5 seconds
+  for the child to go. A file whose owner still runs after that stays
+  until the next daemon run removes it. On Linux, a file whose owner is a
+  zombie (in a container whose pid 1 does not reap it) is now removed.
+  With `--jobs N`, an error in one worker stops the others after their
+  current mutant, and a Ctrl-C quits every worker daemon before the run
+  ends.
+- **SimpleCov in a test helper no longer breaks every mutant under
+  `--rails` or `--boot` (#248).** After the coverage map is built, mutineer
+  pauses Ruby's coverage (#228). SimpleCov saw the paused coverage as off and
+  tried to start it. Ruby refuses that while coverage is paused, so the test
+  helper raised in every mutant. Now a start in a mutant first stops the
+  paused coverage. A mutant whose tests start nothing keeps it paused and pays
+  nothing. This applies to `--daemon` too.
+- **Methods in an ActiveSupport::Concern `class_methods` block are mutated
+  under `--strategy redefine` (#252).** ActiveSupport puts these methods in
+  the concern's `ClassMethods` module, and each includer gets them as class
+  methods. Mutineer named them as instance methods of the concern itself.
+  Redefine (the `--rails` default) then loaded each mutant onto the concern.
+  The tests called the includer's method, so every mutant falsely survived.
+  These methods are now named `Concern::ClassMethods#name`, and redefine
+  loads the mutant onto that module. This applies to a module that ran
+  `extend ActiveSupport::Concern` earlier in the same file. The mutant ids of
+  these methods change, because an id contains the qualified name (owner and
+  method). An instance
+  method with the same name, later in the same file, can get a new id too.
+  An `ignore:` entry or a `--baseline` survivor for one of these methods no
+  longer matches. Replace it with the new id from a new run.
+- **Methods in other `class_methods`, `included` and `prepended` blocks are
+  `unplaceable` under `--strategy redefine` (#252).** ActiveSupport runs an
+  `included` or `prepended` block in each includer, so no constant names the
+  class that owns its methods. A `class_methods` block that Mutineer cannot
+  tie to a concern has the same problem: one in a def, in Rails'
+  `concerning`, in an unassigned `Module.new`, or in a module that does not
+  run `extend ActiveSupport::Concern` earlier in the file. Redefine loaded each
+  mutant onto the enclosing module, and the mutant could falsely survive. Now
+  redefine reports these mutants as `unplaceable` and does not run them. Like
+  every `unplaceable` mutant, they leave the score and do not count toward
+  `--threshold`, so a gate that failed on these false survivors can now pass.
+  Their names and mutant ids do not change. `--strategy reload` runs them, but under
+  ActiveSupport it cannot yet run a concern file that has an `included` or
+  `prepended` block: those mutants are `errored` (#257). Another library's
+  method with one of these names is `unplaceable` under redefine too, even
+  when that library runs the block in the module itself and redefine used to
+  run it correctly. Mutineer cannot tell that library from ActiveSupport, so it
+  does not guess. Use `--strategy reload` for those mutants.
+- **A file in a namespace directory scores under `--rails --strategy reload`
+  and `--rails --daemon` (#253).** Mutineer writes each mutant to a temp file
+  next to the source and loads it. With lazy loading, loading it can be the
+  first time Zeitwerk scans that directory, such as `app/models/billing/`.
+  Zeitwerk then raised `Zeitwerk::NameError` on the temp file's name, and the
+  mutants of the file errored. Parallel daemon workers hit the same error on
+  each other's files. Now the temp files are hidden: `.mutineer_mutant*.rb`
+  and `.mutineer_daemon*.rb`. Zeitwerk skips hidden files, in every loader.
+  The cleanup sweeps still remove a file an older version left without the
+  dot. Each mode sweeps its own files before the app boots: an in-process run
+  now removes an old `mutineer_mutant*.rb` first, and the daemon removes an
+  old `mutineer_daemon*.rb`. An old file of the other mode still stops the
+  boot, so delete it by hand. Eager loading, the default on CI, scans every
+  directory at boot, so it never hit the error.
+- **A mutant on a later line of a multi-line `&&` or `||` can be killed
+  (#254).** Ruby counts only the first line of a statement. For code that runs
+  only sometimes on a later line, such as the right side of `verified &&` on
+  its own line, Mutineer picked no tests, so the mutant was always
+  `no_coverage`, however good the tests were. Now it runs the tests that ran
+  the statement. A kill counts. A survivor stays `no_coverage`, because the
+  run cannot tell whether those tests reached it, so no survivor is added and
+  a score can rise with no test change. Such a mutant can now also end as
+  `errored` or `timeout`; like any mutant with no verdict, that counts toward
+  the `--threshold` completeness check, so a failure is reported, not hidden.
+  This also applies to a later `when` condition, the value of `x rescue y`,
+  `&.` arguments and an `||=` value on a later line, and to `--daemon`. A
+  branch of a ternary or `if`, and the body of `x if c`, keep the verdict they
+  had before.
 
 ## [1.6.0] - 2026-10-08
 

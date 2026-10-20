@@ -48,6 +48,16 @@ class ExternalBackendTest < Minitest::Test
     assert_predicate result, :killed?
   end
 
+  # 126 (cannot execute) and 127 (command not found) come from a wrapper such
+  # as `bundle exec` that could not start the suite: no test ran, so no kill.
+  def test_cannot_run_exit_codes_are_error_not_killed
+    [126, 127].each do |code|
+      result = Backend.run("#{RUBY} -e exit(#{code}) %{files}", ["x"], timeout: 30)
+      assert_predicate result, :error?, "exit #{code}"
+      refute_predicate result, :killed?
+    end
+  end
+
   def test_signal_death_is_error_not_killed
     # Self-SIGKILL: exitstatus is nil; must not inflate kill rate.
     result = Backend.run("#{RUBY} -e 'Process.kill(:KILL, Process.pid)' %{files}", ["x"], timeout: 30)
@@ -75,6 +85,18 @@ class ExternalBackendTest < Minitest::Test
     end
   ensure
     ENV.delete("MUTINEER_ENV_PROBE")
+  end
+
+  # Rails parallelize and Spring read these in the test-command child.
+  def test_child_env_pins_parallel_workers_and_disables_spring
+    prior = ENV["PARALLEL_WORKERS"]
+    ENV["PARALLEL_WORKERS"] = "8"
+    env = Backend.child_env
+    assert_equal "1", env["PARALLEL_WORKERS"]
+    assert_equal "1", env["DISABLE_SPRING"]
+    assert_equal "8", ENV["PARALLEL_WORKERS"]
+  ensure
+    prior.nil? ? ENV.delete("PARALLEL_WORKERS") : ENV["PARALLEL_WORKERS"] = prior
   end
 
   # child_env must pass nil (not omit keys) so Process.spawn unsets them.

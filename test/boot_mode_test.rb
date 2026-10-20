@@ -76,7 +76,8 @@ class BootModeTest < Minitest::Test
 
   # #228: Coverage runs while the map is built, then is suspended, so no mutant
   # fork pays for it. The second run resumes it for a cache hit, which
-  # suspends it again.
+  # suspends it again. A mutant whose tests never start Coverage leaves it
+  # suspended (#248 stops it only when a helper starts it).
   def test_coverage_is_suspended_in_mutants_after_the_map_is_built
     # Another test in this process may have left Coverage running, which reads
     # as a host's Coverage (see the test below).
@@ -106,6 +107,24 @@ class BootModeTest < Minitest::Test
     end
     Dir.mktmpdir("mutineer-boot") { |cache| run_boot(STRONG, cache_dir: cache) }
     assert Coverage.running?, "the host's Coverage is still running after the run"
+  end
+
+  # #253: a mutant file an older version left without the dot is swept before the
+  # boot. In an autoload directory it would stop Zeitwerk during the boot.
+  def test_an_orphan_mutant_file_is_swept_before_the_boot
+    orphan = File.join(BOOT, "mutineer_mutant20200101-1-orphan.rb")
+    File.write(orphan, "raise 'an orphan was loaded'\n")
+    Dir.mktmpdir("mutineer-boot") do |cache|
+      boot = File.join(cache, "boot.rb")
+      File.write(boot, "$orphan_at_boot = File.exist?(#{orphan.dump})\nrequire #{SRC.dump}\n")
+      config = Mutineer::Config.new(sources: [SRC], tests: [STRONG], boot: boot, strategy: "redefine",
+                                    project_root: BOOT, cache_dir: cache, jobs: 1)
+      Mutineer::Runner.execute(config)
+    end
+
+    assert_equal false, $orphan_at_boot
+  ensure
+    File.delete(orphan) if File.exist?(orphan)
   end
 
   # The AR reconnect hook is a guarded no-op when ActiveRecord is absent (as here).

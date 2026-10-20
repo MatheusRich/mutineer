@@ -26,7 +26,7 @@ module Mutineer
     BROKEN_FLOOR = 1
 
     # The JSON report's `schema_version` (see docs/json-schema.md).
-    SCHEMA_VERSION = "1.7"
+    SCHEMA_VERSION = "1.8"
 
     # The warning both matrix renderers give under the redundant tests.
     MATRIX_REDUNDANT_NOTE = "Delete redundant tests one at a time: two of them can be the only killers of one mutant."
@@ -74,11 +74,11 @@ module Mutineer
         out.print rendered
       end
 
+      return warn_errors_without_gate(err) unless threshold&.positive?
+
       # Both ways a run can fail the gate on completeness, said here rather than in
       # the human renderer: --format json is the documented CI path, and a run that
       # exits 1 must say why on every format, not only the one a person reads.
-      return unless threshold&.positive?
-
       if @agg.mutation_score.nil? && broken_nil_score?
         err.puts "[mutineer] nothing could be scored (#{broken_counts_detail}), so the " \
                  "--threshold gate fails. See no_verdict[] in --format json for the cause of each."
@@ -89,6 +89,22 @@ module Mutineer
       end
     end
 
+    # Errors are out of the score, so a run with no --threshold passes however
+    # many mutants errored. Say so, and say what --threshold would enforce.
+    #
+    # @api private
+    # @param err [IO] error stream.
+    # @return [void]
+    def warn_errors_without_gate(err)
+      count = @agg.errored_count
+      return unless count.positive?
+
+      err.puts "[mutineer] #{count} #{count == 1 ? 'mutant' : 'mutants'} errored. Errors are not in the " \
+               "score, so they do not fail a run without a positive --threshold. With one, the run fails " \
+               "when nothing can be scored, or when more than one mutant has no verdict and they exceed " \
+               "#{(BROKEN_SHARE_LIMIT * 100).round}% of those attempted (no_verdict[] in --format json)."
+    end
+
     # Renders the human report.
     #
     # @param out [IO] output stream.
@@ -96,11 +112,8 @@ module Mutineer
     # @param threshold [Float] score threshold.
     # @return [void]
     def human_report(out, err, threshold)
-      if @agg.total.zero?
-        err.puts "No mutations generated — verify target files contain in-scope " \
-                 "operators and are reached by the suite."
-        return
-      end
+      # The CLI explains an empty run for every format (CLI.warn_empty_run).
+      return if @agg.total.zero?
 
       out.puts "Mutineer — Mutation Results"
       out.puts "========================="
@@ -220,7 +233,7 @@ module Mutineer
         # Equivalent mutants the user suppressed: emitted with their stable id so
         # the user can audit what is silenced (and copy ids for survivors they
         # want to add). Excluded from the score; never in `survivors`.
-        ignored: @agg.results.select(&:ignored?).map { |r| mutant_json(r) }
+        ignored: @agg.results.select(&:ignored?).map { |r| ignored_json(r) }
                      .sort_by { |h| [h[:file], h[:line], h[:operator], h[:id].to_s] },
         # Per-source breakdown (additive; baseline consumes it). Sorted by file so
         # output is byte-stable. Reuses AggregateResult via by_source.
@@ -284,6 +297,7 @@ module Mutineer
         #{summary_html}
         #{per_source_html(per_source)}
         #{survivors_html(survivors)}
+        #{ignored_html}
         #{matrix_html}
         </body>
         </html>
@@ -343,6 +357,28 @@ module Mutineer
         CARD
       end.join("\n")
       "<h2>Surviving Mutants</h2>\n#{cards}"
+    end
+
+    # Ignored mutants, each with its id and its reason when the user gave one.
+    #
+    # @api private
+    # @return [String] HTML, or "" when none were ignored.
+    def ignored_html
+      rows = @agg.results.select(&:ignored?).map { |r| ignored_json(r) }
+                 .sort_by { |h| [h[:file], h[:line], h[:operator], h[:id].to_s] }
+      return "" if rows.empty?
+
+      cards = rows.map do |row|
+        reason = row[:reason] ? "<div class=\"meta\">#{esc(row[:reason])}</div>" : ""
+        <<~CARD.chomp
+          <div class="survivor">
+          <h3>#{esc(row[:subject])}</h3>
+          <div class="meta">#{esc(row[:file])}:#{row[:line]} &middot; #{esc(row[:operator])} &middot; <span class="id">#{esc(row[:id])}</span></div>
+          #{reason}
+          </div>
+        CARD
+      end.join("\n")
+      "<h2>Ignored mutants</h2>\n#{cards}"
     end
 
     # The kill-matrix section of the HTML report: the counts, then the blind and
@@ -631,9 +667,25 @@ module Mutineer
       lines.size == 1 ? start_line.to_s : "#{start_line},#{lines.size}"
     end
 
+    # One ignored mutant. `reason` is present only when the user wrote one.
+    #
+    # @api private
+    # @param result [Mutineer::Result] an ignored result.
+    # @return [Hash]
+    def ignored_json(result)
+      row = mutant_json(result)
+      text = result.reason
+      row[:reason] = text if text.is_a?(String) && !text.strip.empty?
+      row
+    end
+
     # The fields that name one mutant, for the lists that point at mutants:
     # `no_coverage`, `uncapturable`, `unplaceable`, `ran_at_load`, `ignored` and
     # `baseline.new_survivors`.
+    #
+    # @api private
+    # @param result [Mutineer::Result] the mutant result.
+    # @return [Hash] subject, file, line, operator, token, and id.
     def mutant_json(result)
       m = result.mutation
       file = result.subject.file
@@ -765,7 +817,8 @@ module Mutineer
     end
 
     # Mutants that were actually run. Deliberately not `total`: no_coverage,
-    # skipped-invalid and ignored mutants were never attempted, so counting them
+    # skipped-invalid and ignored mutants are not counted (a #254 no_coverage
+    # mutant ran its statement's tests but is not a verdict), so counting them
     # would dilute the share and let a broken run slip under the limit.
     #
     # skipped-invalid is excluded from both sides: it means a mutant did not

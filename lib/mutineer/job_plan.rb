@@ -11,6 +11,7 @@ require_relative "mutator_registry"
 require_relative "mutant_id"
 require_relative "project_path"
 require_relative "external_backend"
+require_relative "orphan_guard"
 
 module Mutineer
   # The job vocabulary every backend shares: which mutants run, which are
@@ -55,6 +56,7 @@ module Mutineer
       # its ordinal instead of minting a second id for the same mutant.
       name_decls = Hash.new { |h, k| h[k] = {} }
       ignore_set = config.ignore.to_set
+      ignore_reasons = config.ignore_reasons || {}
       jobs = []
       ignored_results = []
       legacy_ignore_matches = {}
@@ -87,7 +89,8 @@ module Mutineer
             (legacy_ignore_matches[legacy] ||= []) << { id: id, file: id_path, subject: subject.qualified_name }
           end
           if ignored
-            ignored_results << Result.ignored.with(subject: subject, mutation: mutation, id: id)
+            reason = suppression_reason(mutation.operator, lines[i], [id, legacy], disabled, ignore_reasons)
+            ignored_results << Result.ignored.with(subject: subject, mutation: mutation, id: id, reason: reason)
           else
             jobs << [subject, mutation, id]
           end
@@ -149,8 +152,11 @@ module Mutineer
     # order of {CoverageMap#order_tests} (paired files, then cheapest), or
     # `[:verdict, Result]` (no_coverage / uncapturable) when none do. A line
     # Ruby does not count (a later line of a multi-line statement) uses the
-    # tests that ran the statement that holds it ({StatementLines}), unless the
-    # mutant sits in code of that statement that runs only sometimes.
+    # tests that ran the statement that holds it ({StatementLines}). When the
+    # mutant sits in code of that statement that runs only sometimes (the right
+    # side of a multi-line `a && b`), those tests may not have run it, so the
+    # answer is `[:maybe, abs_test_paths]` and {selection_verdict} treats a
+    # survivor as no_coverage (#254).
     #
     # An empty selection is `:ran_at_load` when the mutant's line ran while the
     # app booted or its class loaded ({ran_at_load?}): no test ran it, but the
@@ -167,13 +173,19 @@ module Mutineer
     # @param subject [Mutineer::Subject, nil] the subject (for its method body range).
     # @param source [String] the original source text.
     # @param coverage_map [Mutineer::CoverageMap] the built/loaded coverage map.
-    # @return [Array(Symbol, Object)] `[:run, Array<String>]` or `[:verdict, Result]`.
+    # @return [Array(Symbol, Object)] `[:run, Array<String>]`, `[:maybe, Array<String>]`
+    #   or `[:verdict, Result]`.
     def self.coverage_selection(source_file, mutation, subject, source, coverage_map)
       line   = source.byteslice(0, mutation.start_offset).count("\n") + 1
       chosen = coverage_map.tests_for(source_file, line)
+      kind   = :run
       if chosen.empty? && subject
         # A multi-line statement has a count on one of its lines only.
         lines = StatementLines.for(subject.def_node, source, mutation.start_offset)
+        if lines.empty?
+          lines = StatementLines.for(subject.def_node, source, mutation.start_offset, loose: true)
+          kind = :maybe
+        end
         chosen = lines.flat_map { |l| coverage_map.tests_for(source_file, l) }.uniq
       end
       if chosen.empty?
@@ -187,7 +199,25 @@ module Mutineer
         return [:verdict, Result.no_coverage]
       end
 
-      [:run, coverage_map.order_tests(source_file, chosen).map { |t| File.expand_path(t, coverage_map.project_root) }]
+      [kind, coverage_map.order_tests(source_file, chosen).map { |t| File.expand_path(t, coverage_map.project_root) }]
+    end
+
+    # The verdict of a mutant whose tests {coverage_selection} chose as `:maybe`:
+    # they ran its statement but may not have run the mutated code. A kill is a
+    # real kill. A survivor is no_coverage, because the run cannot tell "never
+    # ran" from "ran unchecked" (#254); like any no_coverage mutant it has no
+    # `--matrix` row. An error or a timeout stays what it is: the mutant ran, and
+    # a failure is reported, not hidden. A kill keeps its whole `--matrix` row.
+    # A result of any other selection comes back unchanged.
+    #
+    # @param kind [Symbol, nil, false] the first element of {coverage_selection}'s
+    #   answer, or a falsy value when no selection ran.
+    # @param result [Mutineer::Result] the mutant's verdict.
+    # @return [Mutineer::Result]
+    def self.selection_verdict(kind, result)
+      return result unless kind == :maybe && result.survived?
+
+      result.with(status: :no_coverage, kills: nil)
     end
 
     # True when the mutant's line ran while the app booted or its class loaded,
@@ -242,13 +272,19 @@ module Mutineer
       result.with(status: :ran_at_load)
     end
 
-    # Map each line number to :all or a set of operator symbols, using
-    # inline `# mutineer:disable-line [ops]` markers (RuboCop semantics: the marker
-    # sits on the same physical line as the code it silences). A bare marker
-    # disables every operator on that line; `disable-line a, b` only the listed
-    # operators. Block-form disable/enable ranges are intentionally not supported.
-    # Only a real `#` comment counts: Prism lists the comments, so the marker
-    # text inside a string, heredoc or regex silences nothing (#158).
+    # Map each line number to `{ ops:, reason: }`, using inline
+    # `# mutineer:disable-line [ops]` markers (RuboCop semantics: the marker
+    # sits on the same physical line as the code it silences). `ops` is `:all`
+    # or a set of operator symbols. `reason` is the text after `--`, or nil.
+    # A bare marker disables every operator on that line; `disable-line a, b`
+    # only the listed operators. Block-form disable/enable ranges are
+    # intentionally not supported. Only a real `#` comment counts: Prism lists
+    # the comments, so the marker text inside a string, heredoc or regex
+    # silences nothing (#158).
+    #
+    # @param source [String] the source text.
+    # @param file [String] the file name, for warnings.
+    # @return [Hash{Integer => Hash}] line => `{ ops:, reason: }`.
     def self.suppress_map(source, file)
       map = {}
       Parser.comments(source).grep(Prism::InlineComment).each do |comment|
@@ -261,12 +297,32 @@ module Mutineer
         ops = nil if ops&.empty?
         unknown = ops.to_a.reject { |o| MutatorRegistry::ALL.key?(o) }
         unknown.each do |o|
-          warn "mutineer: unknown operator #{o.inspect} in #{file}:#{line} " \
+          warn "mutineer: unknown operator #{o.inspect} in #{file}:#{line}#{Mutineer.did_you_mean(o, MutatorRegistry::ALL.keys)} " \
                "(known: #{MutatorRegistry::ALL.keys.join(', ')}); write a reason after --"
         end
-        map[line] = ops ? ops.map(&:to_sym).to_set : :all
+        reason = comment.slice[/\s--\s*(.*)\z/, 1]&.strip
+        reason = nil if reason.nil? || reason.empty?
+        map[line] = { ops: ops ? ops.map(&:to_sym).to_set : :all, reason: reason }
       end
       map
+    end
+
+    # The operator set for one suppress-map entry. A Hash is the current shape
+    # (`ops` plus `reason`). `:all` and a Set remain valid for callers that
+    # build the map by hand.
+    #
+    # @param entry [Hash, Symbol, Set, nil] one line's suppress-map value.
+    # @return [Symbol, Set, nil] `:all`, the operator set, or nil.
+    def self.line_ops(entry)
+      entry.is_a?(Hash) ? entry[:ops] : entry
+    end
+
+    # The reason text on one suppress-map entry, when the entry stores one.
+    #
+    # @param entry [Hash, Object] one line's suppress-map value.
+    # @return [String, nil]
+    def self.line_reason(entry)
+      entry.is_a?(Hash) ? entry[:reason] : nil
     end
 
     # True when this mutant is suppressed: its line bears a disable-line marker
@@ -279,11 +335,56 @@ module Mutineer
     def self.suppressed?(operator, line, ids, disabled, ignore_set)
       return true if Array(ids).any? { |id| ignore_set.include?(id) }
 
-      case (entry = disabled[line])
+      case line_ops(disabled[line])
       when :all then true
-      when Set  then entry.include?(operator)
+      when Set  then line_ops(disabled[line]).include?(operator)
       else false
       end
+    end
+
+    # Why an ignored mutant was suppressed. An inline reason wins. Otherwise
+    # the reason is the first matching ignore id that has one. Blank text is nil.
+    #
+    # @param operator [Symbol] the mutant's operator.
+    # @param line [Integer] the mutant's line.
+    # @param ids [Array<String>] the new id and the old-format id.
+    # @param disabled [Hash] the file's suppress map.
+    # @param ignore_reasons [Hash{String => String}] id => reason.
+    # @return [String, nil]
+    def self.suppression_reason(operator, line, ids, disabled, ignore_reasons)
+      entry = disabled[line]
+      ops = line_ops(entry)
+      line_hit = ops == :all || (ops.is_a?(Set) && ops.include?(operator))
+      inline = line_hit ? line_reason(entry) : nil
+      return inline if inline.is_a?(String) && !inline.strip.empty?
+
+      Array(ids).each do |candidate|
+        text = ignore_reasons[candidate]
+        return text if text.is_a?(String) && !text.strip.empty?
+      end
+      nil
+    end
+
+    # Narrows the jobs and the suppressed (ignored) results to --since when it
+    # is set, as the dry run does, so a scoped report lists only mutants on
+    # changed lines. Also returns how many mutants there were before narrowing
+    # (nil without --since), so the CLI can tell "the changes held nothing to
+    # test" from "nothing was mutable at all".
+    #
+    # @param jobs [Array] (subject, mutation, id) entries to run.
+    # @param ignored_results [Array<Mutineer::Result>] suppressed mutants.
+    # @param source_map [Hash{String => String}] source text by file.
+    # @param config [Mutineer::Config] run configuration.
+    # @return [Array(Array, Array<Mutineer::Result>, Integer), Array(Array, Array<Mutineer::Result>, nil)]
+    #   the jobs to run, the ignored results to report, and the count before --since.
+    def self.scope_since(jobs, ignored_results, source_map, config)
+      return [jobs, ignored_results, nil] unless config.since
+
+      # One pass, so git computes the changed lines once.
+      ignored_entries = ignored_results.map { |r| [r.subject, r.mutation, r] }
+      kept = filter_since(jobs + ignored_entries, source_map, config)
+      kept_ignored, kept_jobs = kept.partition { |entry| entry.last.is_a?(Result) }
+      [kept_jobs, kept_ignored.map(&:last), jobs.size + ignored_results.size]
     end
 
     # --since: keep only jobs whose mutation lands on a line changed since the git
@@ -335,16 +436,21 @@ module Mutineer
     end
 
     # Removes stale mutant tempfiles from the given directories. The daemon writes a
-    # differently-named temp, so {DaemonBackend} passes its glob when it has to sweep
-    # tool-side (nothing boots on an empty run, so the daemon's own sweep never runs).
+    # differently-named temp, so {DaemonBackend} passes its glob when it sweeps
+    # tool-side at the end of every daemon run, empty or not.
+    # A daemon file another process still owns is left in place. In-process mutant
+    # files have no owner recorded in the name, so this still removes those orphans.
     #
     # @param dirs [Array<String>] directories to sweep.
     # @param glob [String] filename pattern to remove.
-    # @return [void]
-    def self.sweep_orphans(dirs, glob = "mutineer_mutant*.rb")
-      dirs.each do |dir|
-        Dir.glob(File.join(dir, glob)).each do |f|
-          File.unlink(f) rescue nil # rubocop:disable Style/RescueModifier
+    # @return [Array<String>] the files left in place because a process owns them.
+    def self.sweep_orphans(dirs, glob = "{.,}mutineer_mutant*.rb")
+      dirs.flat_map do |dir|
+        Dir.glob(File.join(dir, glob)).select do |path|
+          next true if OrphanGuard.mutant_file_in_use?(path)
+
+          File.unlink(path) rescue nil # rubocop:disable Style/RescueModifier
+          false
         end
       end
     end

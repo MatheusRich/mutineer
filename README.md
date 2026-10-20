@@ -1,6 +1,8 @@
 # Mutineer
 
 [![Gem Version](https://img.shields.io/gem/v/mutineer?logo=rubygems&color=e23b3b)](https://rubygems.org/gems/mutineer)
+[![CI](https://github.com/davidteren/mutineer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/davidteren/mutineer/actions/workflows/ci.yml)
+[![mutation score at least 85%](https://img.shields.io/badge/mutation%20score-at%20least%2085%25-67286a)](https://github.com/davidteren/mutineer/actions/workflows/ci.yml)
 [![GitHub Marketplace](https://img.shields.io/badge/Marketplace-Mutineer%20Ruby-2da44e?logo=githubactions&logoColor=white)](https://github.com/marketplace/actions/mutineer-ruby)
 [![Socket](https://img.shields.io/badge/Socket-security%20report-0a66c2?logo=socket&logoColor=white)](https://socket.dev/rubygems/package/mutineer)
 
@@ -27,6 +29,70 @@ for how the two tools differ.
 
 📖 **[mutineer.github.io →](https://davidteren.github.io/mutineer/)** — overview, operators, and usage.
 
+## Is it production-ready?
+
+Read this section before you gate an app on Mutineer.
+Use the Status column to decide.
+Adopt a row whose Status says supported or serial only.
+Not supported in the Parallelism column means `--daemon` cannot run that row.
+
+Mutineer itself needs Ruby 3.4 or later.
+In-process runs fork, so use Linux or macOS.
+A plain Ruby project with no database is supported.
+It runs in parallel on those systems.
+
+<!-- contract:support-matrix -->
+| Ruby | Database | Framework | Parallelism | Status |
+| --- | --- | --- | --- | --- |
+| 3.4 or later | SQLite file | Minitest | supported with `--daemon` | supported |
+| 3.4 or later | SQLite file | RSpec | not supported | serial only |
+| 3.4 or later | PostgreSQL | Minitest | supported with `--daemon` | supported |
+| 3.4 or later | PostgreSQL | RSpec | not supported | serial only |
+| 3.4 or later | MySQL 8 | Minitest | supported with `--daemon` | supported |
+| 3.4 or later | MySQL 8 | RSpec | not supported | serial only |
+| 3.4 or later | MariaDB | Minitest | not tested | not tested |
+| 3.4 or later | SQLite in memory | Minitest | not supported | serial only |
+| 3.4 or later | SQLite in memory | RSpec | not supported | serial only |
+| 3.4 or later | more than one database | Minitest | one worker | serial only |
+| 3.4 or later | more than one database | RSpec | not supported | serial only |
+
+This matrix is for a Rails app on Ruby 3.4 or later.
+`supported` means you can run that cell in parallel.
+`serial only` means the safe run uses one worker.
+`not supported` means `--daemon` cannot run that cell.
+`not tested` means no CI job runs that cell.
+SQLite file means a database file, not `:memory:`.
+Minitest on that file can use `--daemon`.
+RSpec on that file is serial only.
+PostgreSQL with Minitest can use `--daemon`.
+PostgreSQL with RSpec is serial only.
+MySQL 8 with Minitest can use `--daemon`.
+MariaDB is not tested.
+MySQL 5.7 is not supported.
+A `:memory:` database is serial only.
+An app with more than one database runs one worker.
+`--daemon` isolates only the primary connection.
+`--rails` without `--daemon` is serial on every row.
+A Postgres worker database is copied once, at the start of the run.
+A MySQL 8 worker database is created once, at the start of the run, and the rows are copied then.
+A test that commits rows outside a transaction leaves them in that worker database.
+The next mutant on that worker sees those rows.
+Rails parallel tests have the same ceiling.
+
+Mutineer sets `PARALLEL_WORKERS=1`, so a `parallelize` call in `test_helper.rb` starts no Rails workers during a mutant run.
+See [Rails parallel tests, Spring, Bootsnap, and Redis](https://github.com/davidteren/mutineer#rails-parallel-tests-spring-bootsnap-and-redis).
+
+<!-- /contract:support-matrix -->
+
+An app on an older Ruby uses `--test-command`.
+Mutineer still runs on Ruby 3.4 or later.
+That path is serial.
+It does not narrow tests by coverage.
+A crash in the command can count as a kill.
+
+What a release will not break is in
+[STABILITY.md](https://github.com/davidteren/mutineer/blob/main/STABILITY.md).
+
 ## Install
 
 ```sh
@@ -43,6 +109,7 @@ gem "mutineer", group: :test
 
 ```sh
 mutineer run <source...> --test <test> [--test <test>...] [options]
+mutineer migrate <source...> [--dry-run] [--operators LIST]
 ```
 
 Mutate `lib/calculator.rb`, checking it against its test, and fail CI if the
@@ -51,6 +118,26 @@ mutation score drops below 90%:
 ```sh
 mutineer run lib/calculator.rb --test test/calculator_test.rb --threshold 90
 ```
+
+### Migrate old ignore ids
+
+```sh
+mutineer migrate <source...> [--dry-run] [--operators LIST]
+```
+
+`migrate` rewrites old-format ids in `.mutineer.yml` `ignore:` to the current
+ids. It keeps comments and every other line. When one old id matches several
+mutants, it writes every new id. That keeps the 1.x match. An id that matches
+nothing stays, and the command exits 1. In an `{ id:, reason: }` entry, the
+id changes and the reason stays. One entry holds one id, so an old id there
+that now matches several mutants stays as written: the command names the new
+ids, exits 1, and you split the entry by hand. A block scalar under `ignore:`
+is not supported: the command exits 2 and does not change the file.
+`--dry-run` prints each change and writes nothing.
+
+Pass the same sources and `--operators` you use for `run`. The command runs
+no tests. It does not rewrite a baseline. Generate a new baseline with
+`--format json`.
 
 ### Options
 
@@ -61,7 +148,7 @@ mutineer run lib/calculator.rb --test test/calculator_test.rb --threshold 90
 | `--threshold FLOAT` | Exit 1 when the score is below FLOAT, or when nothing could be scored and something broke, or more than one mutant produced no verdict and they exceed 10% of those attempted (default: 0 = off) |
 | `--only NAME` | Restrict to one fully-qualified subject, e.g. `Calculator#add` |
 | `--framework NAME` | `minitest` (default) or `rspec`; auto-detected as rspec when most `--test` files end in `_spec.rb` |
-| `--since REF` | Only mutate lines changed since git `REF` (e.g. `origin/main`). Untracked files are scored in full unless Git ignores them. |
+| `--since REF` | Only mutate lines changed since git `REF` (e.g. `origin/main`). Untracked files are scored in full unless Git ignores them. The report lists only suppressed mutants on changed lines, too. |
 | `--no-since` | Disable diff scoping; a typed no beats a `.mutineer.yml` `since:` key |
 | `--baseline FILE` | Compare against a prior `--format json` run; exit 1 on new survivors / score drop (score drop is skipped under `--since`, whose score covers a different denominator; see [CI](https://github.com/davidteren/mutineer#ci-gating)) |
 | `--baseline-epsilon FLOAT` | Score-drop tolerance for `--baseline` (default: 0) |
@@ -74,11 +161,12 @@ mutineer run lib/calculator.rb --test test/calculator_test.rb --threshold 90
 | `--capture-timeout SECONDS` | Time limit for each in-process coverage-capture subprocess and for the clean run of the unmutated tests, in whole seconds (default: 120). A suite slower than this stops the run as not green. `--daemon` uses it for its coverage capture; `--test-command` ignores it and says so |
 | `--cache-dir DIR` | Directory for the coverage cache (default: `.mutineer`). Give two runs from the same project root different directories so they do not share `coverage.json`. `--test-command` builds no cache, so it ignores it and says so |
 | `--test-command CMD` | Run the suite as a subprocess in the app's own runtime (for apps on Ruby < 3.4); `CMD` must contain `%{files}`. See [Apps on Ruby < 3.4](https://github.com/davidteren/mutineer#apps-on-ruby--34) |
-| `--daemon` | Boot the app once in a persistent daemon and fork per mutant, with per-worker DB isolation so `--jobs N` is safe under Rails (needs `--rails`/`--boot`; not with `--test-command`). See [the daemon backend](https://github.com/davidteren/mutineer#faster-parallel-safe-rails-the---daemon-backend) |
+| `--daemon` | Boot the app once in a persistent daemon and fork per mutant, with per-worker DB isolation so `--jobs N` is safe under Rails (needs `--rails`/`--boot`; not with `--test-command`). See [the daemon backend](https://github.com/davidteren/mutineer#faster-parallel-safe-rails-the---daemon-backend). `--no-daemon` beats a `.mutineer.yml` `daemon:` key. It keeps `--rails` serial, which is the 1.x default, and in 2.0 it opts out of the parallel default |
 | `--format human\|json\|html` | Report format (default: human; `html` is a self-contained file) |
 | `--output FILE` | Write the report to FILE instead of stdout |
 | `--dry-run` | List candidate mutations without executing (honors suppression) |
 | `--fail-fast` | Stop at the first surviving mutant (`--no-fail-fast` beats a `.mutineer.yml` `fail_fast:` key) |
+| `--allow-empty` | A run with no mutants is expected. Without it, an empty run warns that Mutineer 2.0 will fail it. A `--since` run whose changes hold no mutants does not warn: it reports that the changes hold nothing to test. A `--since` run with no mutants even before scoping still warns. `--no-allow-empty` beats a `.mutineer.yml` `allow_empty:` key |
 | `--matrix` | Run every covering test for each mutant and report the blind and redundant tests; the JSON report also lists each mutant's killers. In-process only; exits 2 with `--daemon`, `--test-command`, `--fail-fast` or `--dry-run`. RSpec needs 3.3 or later. `--no-matrix` beats a `.mutineer.yml` `matrix:` key. See [Kill matrix](https://github.com/davidteren/mutineer#kill-matrix) |
 | `--list-operators` | List available operators (default vs optional) and exit |
 | `--version`, `--help` | Print version / usage and exit |
@@ -139,6 +227,50 @@ Add Mutineer to your Gemfile's test group:
 gem "mutineer", group: :test, require: false
 ```
 
+Start from one command. It writes `.mutineer.yml` and prints the first run.
+It does not replace a file you already wrote. Pass `--force` to replace one.
+
+```sh
+RAILS_ENV=test bundle exec mutineer init --rails
+```
+
+The path from that first report to a CI gate is the
+[Rails rollout guide](https://davidteren.github.io/mutineer/rails.html).
+
+### Rails parallel tests, Spring, Bootsnap, and Redis
+
+Mutineer sets `PARALLEL_WORKERS` to `1` for every run.
+Rails then runs each mutant's tests in one process.
+Your `parallelize(workers:)` call stays in `test_helper.rb`.
+It does not start Rails workers during a mutant run.
+If you already set `PARALLEL_WORKERS` to another value, Mutineer replaces it and prints one line.
+With `--test-command`, a script your command runs can set `PARALLEL_WORKERS` again.
+Its value wins, and the Rails workers start again.
+Remove that line from the script, or write `PARALLEL_WORKERS=${PARALLEL_WORKERS:-4}` so it keeps the 1 Mutineer passes.
+
+Mutineer does not run your `parallelize_setup` hooks.
+Rails registers its own database hook in that same list.
+Running the list would point the tests at `<base>-<n>` instead of Mutineer's database.
+
+`--test-command` also sets `DISABLE_SPRING=1`.
+Spring does not start for that command.
+The `--daemon` path loads `config/environment` itself, so Spring does not start there either.
+A wrapper that sets `DISABLE_SPRING` again wins, same as `PARALLEL_WORKERS`.
+
+Bootsnap checks its compile cache by file path, size, and modification time in whole seconds.
+When the size and the time match, it uses the cached code without reading the file content.
+The in-process and `--daemon` paths load each mutant from a new file, so the cache cannot mix them up.
+`--test-command` rewrites the source file in place.
+Two mutants of the same size, written in the same second, can then load the first one's cached code.
+To rule that out, set `DISABLE_BOOTSNAP_COMPILE_CACHE=1` on the Mutineer command.
+Bootsnap keeps its cache in `tmp/cache/bootsnap`, or under `$BOOTSNAP_CACHE_DIR` when that is set.
+If a run uses code that no longer matches your files, delete that folder and run again.
+
+`redis-client` (which `redis` 5 uses) opens a new connection after a fork on its own.
+You do not set anything in Mutineer for this.
+`redis` 4.x raises `Redis::InheritedError` instead.
+Open that connection after boot, or reconnect it in an after-fork hook.
+
 ### Faster, parallel-safe Rails (the `--daemon` backend)
 
 `--rails` boots your app once but runs mutants **serially** — parallel `--jobs`
@@ -169,10 +301,26 @@ RAILS_ENV=test bundle exec mutineer run \
 - **One backend at a time** — `--daemon` can't be combined with `--test-command`
   (choose one), and it needs an app to boot (`--rails` or `--boot`).
 
-Status: **SQLite** only (hermetic, CI-proven). Per-worker provisioning for
-**Postgres** and other adapters is not supported: on those, `--daemon` scores
-every mutant as `error`. Use `--daemon` with a SQLite test database, or drop
-`--daemon` to run serially on other adapters.
+Status: **SQLite**, **PostgreSQL**, and **MySQL 8** (Minitest). Each Postgres worker uses a
+database named `<base>-mutineer-<N>` (shortened when that would pass 63 bytes).
+Mutineer copies the test database into those names before the workers start,
+and leaves them in place when the run ends. Drop one with
+`DROP DATABASE "myapp_test-mutineer-0";` (use your test database name and slot).
+Each MySQL 8 worker uses a database named `<base>-mutineer-<N>` (shortened when that would pass 64 bytes).
+Mutineer creates that database, loads `schema.rb` or `structure.sql`, and copies rows before the workers start.
+It does not copy the database again after an error or a timeout.
+The worker databases stay in place when the run ends. The next run drops and rebuilds them.
+Triggers in the schema do not fire on the copied rows: in each worker database, Mutineer drops them for the copy and creates them again.
+The database user needs CREATE, DROP, TRIGGER, and the table and row privileges a schema load and a row copy use (such as ALTER, INDEX, REFERENCES, and INSERT) on the worker databases, plus SELECT on the test database.
+A trigger whose DEFINER is another account also needs SET_USER_ID.
+An app on `structure.sql` also needs the `mysql` client on `PATH`.
+Drop one with ``DROP DATABASE `myapp_test-mutineer-0`;`` (MySQL quotes the name with backticks).
+A second run on the same test database stops with `another Mutineer run is using <base>` until the first run ends.
+MySQL runs at most 256 workers.
+`mysql2` and `trilogy` are supported.
+MariaDB is not tested.
+MySQL 5.7 is not supported.
+A `:memory:` database is not supported on `--daemon`.
 
 ### Apps on Ruby < 3.4
 
@@ -201,7 +349,9 @@ RAILS_ENV=test mutineer run app/models/order.rb \
   prepends rbenv/asdf shims when a pin was scrubbed. Do not rely on
   `RBENV_VERSION=…` on the Mutineer command for the suite; use `.ruby-version`
   or a wrapper. Don't put `KEY=val` prefixes *inside* `--test-command` (no shell;
-  that would be treated as the program name).
+  that would be treated as the program name). Mutineer also sets
+  `PARALLEL_WORKERS=1` and `DISABLE_SPRING=1` in the child and replaces a value
+  you set (see [Rails parallel tests, Spring, Bootsnap, and Redis](https://github.com/davidteren/mutineer#rails-parallel-tests-spring-bootsnap-and-redis)).
 
 #### Under a version manager (rbenv / asdf / chruby)
 
@@ -235,10 +385,13 @@ Mutineer also surfaces a targeted smoke-check message when Bundler prints
 Tradeoffs — this path is correct but not free:
 
 - **Slower:** your app re-boots for every mutant (no shared boot yet).
-- **No coverage narrowing:** every mutant runs the *full* `--test` set, so the
-  score is an **upper bound and not comparable to an in-process (`--rails`)
-  score** — uncovered mutants count as survivors, and an infrastructure failure
-  is scored as a kill. Mutineer prints this caveat on every run and aborts up
+- **No coverage narrowing:** every mutant runs the full `--test` set.
+  The run is serial.
+  A crash in the command can count as a kill.
+  Uncovered mutants count as survivors.
+  Do not compare a `--test-command` score with an in-process score.
+  Exit codes 126 and 127 (the command could not start) are scored `error`.
+  Mutineer prints this caveat on every run and aborts up
   front (a "smoke check") if your unmutated suite isn't green.
 - **Reload strategy only** (`--strategy redefine` is rejected on this path) and
   **serial** (`--jobs` is forced to 1). For apps on Ruby ≥ 3.4, `--daemon` gives
@@ -265,9 +418,12 @@ and once they pass 10% of the attempted mutants the run fails.
 Some mutants are equivalent (behaviour-identical) and survive forever — keeping a
 file off 100%. Suppress them so the score and `--threshold` gate stay meaningful:
 
-- **Inline:** `some_line # mutineer:disable-line` (or scope it: `# mutineer:disable-line comparison`). Put a reason after `--`: `# mutineer:disable-line comparison -- the test checks only 20`.
-- **Config:** a `.mutineer.yml` `ignore:` list of mutant ids. Each survivor's
-  `id` is printed in the JSON report, so copy it straight into `ignore:`.
+- **Inline:** `some_line # mutineer:disable-line` (or scope it: `# mutineer:disable-line comparison`). Put a reason after `--`: `# mutineer:disable-line comparison -- the test checks only 20`. The reason is stored on the ignored mutant and shown in the JSON report and the HTML report. A marker with no reason stores none.
+- **Config:** a `.mutineer.yml` `ignore:` list. A bare mutant id still works. A mapping is `id` plus an optional `reason`. Mutineer 1.7 is the first version that reads a mapping. An older version matches no mutant to a mapping and does not warn, so the mutant it names is not ignored. Add a mapping only after every gate that reads the file runs 1.7 or later. In the Action, the `version:` input sets the version, or your `Gemfile.lock` does when you set `use-bundler: true`. In your own CI job, your `Gemfile.lock` sets it. The reason shows in the same reports as an inline reason. Each survivor's `id` is printed in the JSON report.
+
+`mutineer triage REPORT.json --reason TEXT --all` prints one mapping entry per survivor. `--id ID` prints one entry. Repeat `--id` for several. The command does not edit files. Paste the lines under `ignore:`. They are mappings, so every gate that reads the file must run 1.7 or later (see **Config** above).
+
+Built-in skips are listed on the [equivalent skips](https://davidteren.github.io/mutineer/equivalent-skips.html) page. There is no switch to turn them off.
 
 Suppressed mutants are excluded from the score (so 100% becomes reachable).
 
@@ -300,14 +456,18 @@ working until 2.0, with a warning:
   hid mutants you did not mean to ignore. The warning says so. Keep only the ids for the mutant you meant to
   ignore, not all of them. The list covers only the sources and operators in
   that run, so run over every source with every operator set you use (for
-  example your Tier-2 `--operators`) for the full list.
+  example your Tier-2 `--operators`) for the full list. Or run
+  `mutineer migrate` on those sources. It writes every new id. Delete any id
+  you did not mean to ignore. See [Migrate old ignore ids](https://github.com/davidteren/mutineer#migrate-old-ignore-ids).
 - **`--baseline`** An old baseline still matches: a survivor matches a stored
   one with the same old id in the same file. A stored file that is an absolute
   path outside the project root (a baseline written on another machine)
   matches on the old id alone. The run tells you to
-  regenerate it. Regenerate it with `--format json`, but only after every gate
-  that reads it runs 1.3 or later (the Action's `version:` pin, your CI
-  `Gemfile.lock`). An older version treats every new-format survivor as new.
+  generate a new baseline with `--format json`. `migrate` does not rewrite a
+  baseline. Generate the new file only after every gate
+  that reads it runs 1.3 or later. In the Action, the `version:` input sets
+  the version, or your `Gemfile.lock` does when you set `use-bundler: true`.
+  In your own CI job, your `Gemfile.lock` sets it. An older version treats every new-format survivor as new.
 
 The JSON report's `summary.id_format` is `2` for the new format.
 `summary.legacy_id_matches.ignore` counts the old-format ignore entries a run
@@ -490,6 +650,7 @@ config file accepts these keys:
 | `capture_timeout` | A positive integer; the coverage-capture time limit in seconds (default 120) |
 | `cache_dir` | The coverage cache directory (default `.mutineer`) |
 | `matrix` | `true` or `false`; runs every covering test for each mutant and adds the kill matrix to the report |
+| `allow_empty` | `true` or `false`; a run with no mutants is expected, so it does not warn |
 
 Invalid values for known scalar keys, and a blank `operators` list, exit 2
 with a message naming the file and key. An unknown operator name warns and
@@ -499,7 +660,7 @@ is skipped. If none of the names are known, the run exits 2. An empty
 `threshold` and the CLI-only `--baseline-epsilon` use plain decimals such as `90`
 or `0.5`, not `+2`, `1e2`, or `1_0`. String options such as `only` and `baseline`
 cannot be null or boolean. A blank `since` is invalid; use `since: false` to turn
-scoping off. Unknown keys warn and are ignored. Unknown operator names warn and are skipped, and the run exits 2 when none remain. `--operators` replaces a blank or unknown file list.
+scoping off. Unknown keys warn and are ignored. Unknown operator names warn and are skipped, and the run exits 2 when none remain. Both warnings suggest the closest valid name, and both become errors in Mutineer 2.0. `--operators` replaces a blank or unknown file list.
 
 `format`, `strategy`, `output`, `baseline_epsilon`, and `dry_run` are CLI-only.
 For JSON output, use `--format json`, not a `format:` config key. To select RSpec

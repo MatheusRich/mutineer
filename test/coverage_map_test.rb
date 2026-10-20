@@ -624,6 +624,35 @@ class CoverageMapTest < Minitest::Test
     refute build_catalog(dir).phase_a_ran, "the rebuilt cache is a hit"
   end
 
+  # Rails reads PARALLEL_WORKERS inside parallelize. A map saved before that
+  # value was recorded, or saved for another value, must not select tests.
+  def test_old_parallel_worker_cache_is_rebuilt
+    dir = Dir.mktmpdir("mutineer-cache")
+    path = File.join(dir, "coverage.json")
+    prior = ENV.fetch("PARALLEL_WORKERS", nil)
+    ENV["PARALLEL_WORKERS"] = "1"
+    begin
+      build_catalog(dir)
+      payload = JSON.parse(File.read(path))
+      assert_equal "1", payload["parallel_workers"]
+
+      File.write(path, JSON.generate(payload.except("parallel_workers")))
+      rebuilt = build_catalog(dir)
+      assert rebuilt.phase_a_ran, "a cache from before parallel workers were recorded must rebuild"
+
+      saved = JSON.parse(File.read(path))
+      assert_equal "1", saved["parallel_workers"]
+      saved["parallel_workers"] = "4"
+      File.write(path, JSON.generate(saved))
+      again = build_catalog(dir)
+      assert again.phase_a_ran, "a map captured with other Rails workers must rebuild"
+
+      refute build_catalog(dir).phase_a_ran, "the same worker value is a cache hit"
+    ensure
+      prior.nil? ? ENV.delete("PARALLEL_WORKERS") : ENV["PARALLEL_WORKERS"] = prior
+    end
+  end
+
   def test_corrupt_cache_is_rebuilt
     dir = Dir.mktmpdir("mutineer-cache")
     File.write(File.join(dir, "coverage.json"), "{not valid json")
@@ -701,17 +730,21 @@ class CoverageMapTest < Minitest::Test
     assert_empty out
   end
 
+  # The timeout bounds the good capture too: a fresh Ruby that loads Bundler and
+  # Minitest. That takes about 0.2s, but up to 2.5s on a very busy machine, so 5s.
+  # The hang file runs first, so the good capture shows the build goes on after it.
   def test_hanging_test_file_times_out_and_is_skipped
     hang = File.join(Dir.mktmpdir, "hang_test.rb")
     File.write(hang, "sleep 30\n")
     map = nil
-    capture_subprocess_io do
+    _, err = capture_subprocess_io do
       map = Mutineer::CoverageMap.new(
-        source_paths: [CALC], test_paths: [STRONG_TEST, hang],
-        cache_dir: Dir.mktmpdir("mutineer-cache"), project_root: ROOT, capture_timeout: 0.5
+        source_paths: [CALC], test_paths: [hang, STRONG_TEST],
+        cache_dir: Dir.mktmpdir("mutineer-cache"), project_root: ROOT, capture_timeout: 5
       ).build_or_load
     end
-    assert_includes map.failed_test_files.map { |f| File.basename(f) }, "hang_test.rb"
+    assert_equal ["hang_test.rb"], map.failed_test_files.map { |f| File.basename(f) }
+    assert_includes err, "timed out after 5s"
     refute_empty map.tests_for(CALC, line_of("a + b")), "good test still recorded"
   end
 

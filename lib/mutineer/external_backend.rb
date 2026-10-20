@@ -3,6 +3,7 @@
 require "shellwords"
 require "tempfile"
 require_relative "result"
+require_relative "rails_run_env"
 
 module Mutineer
   # Raised when the smoke check (the unmutated suite) is not green, so the run
@@ -25,6 +26,7 @@ module Mutineer
   # Child environment: bundler/gem env injected by Mutineer's Ruby is stripped, and
   # version-manager concrete version bins (e.g. `~/.rbenv/versions/3.4.9/bin`) are
   # removed from PATH so shims / `.ruby-version` can select the app's Ruby (#32).
+  # PARALLEL_WORKERS and DISABLE_SPRING are set to 1 ({RailsRunEnv}).
   module ExternalBackend
     # Generous ceiling for the one-off smoke/calibration run (a cold app boot plus
     # the full suite). The per-mutant timeout is derived from how long this took.
@@ -32,6 +34,9 @@ module Mutineer
     # Poll interval for the deadline wait loop. Independent of Isolation's loop —
     # this backend waits on an external process TREE, not an in-process fork.
     POLL = 0.02
+    # Exit codes a shell or wrapper uses when the command could not run at all
+    # (126: not executable, 127: not found). Scored `error`, never `killed`.
+    CANNOT_RUN_CODES = [126, 127].freeze
 
     # PATH entries that pin a concrete Ruby under a version manager (ahead of
     # shims). Optional trailing slash; normal bins are left alone.
@@ -67,7 +72,8 @@ module Mutineer
     # onto the parent env: set a key to +nil+ to unset it. Scrubs Mutineer/bundler
     # injection and version-manager PATH pins so shims / `.ruby-version` can win.
     # Keeps other vars (e.g. `RAILS_ENV`) so setting them on the Mutineer command
-    # still reaches the suite.
+    # still reaches the suite. Also sets +PARALLEL_WORKERS+ to 1 and
+    # +DISABLE_SPRING+ to 1. A wrapper that sets either variable again wins.
     #
     # @api private
     # @return [Hash{String => String, nil}] env for Process.spawn.
@@ -90,6 +96,7 @@ module Mutineer
                kept
              end
       env["PATH"] = path.join(File::PATH_SEPARATOR)
+      RailsRunEnv.pin_child!(env, spring: true)
       env
     end
 
@@ -145,6 +152,10 @@ module Mutineer
         end
 
         warn output if verbose && !output.empty?
+        # 126 (cannot execute) and 127 (command not found) come from a wrapper
+        # such as `bundle exec` that could not start the suite: no test ran.
+        return Result.error("test-command could not start (exit #{code})") if CANNOT_RUN_CODES.include?(code)
+
         Result.killed
       end
     end

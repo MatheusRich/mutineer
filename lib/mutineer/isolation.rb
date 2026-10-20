@@ -4,6 +4,7 @@ require "tempfile"
 require_relative "result"
 require_relative "parser"
 require_relative "child_stdout"
+require_relative "child_coverage"
 require_relative "kill_channel"
 
 module Mutineer
@@ -56,6 +57,7 @@ module Mutineer
         code = 0
         begin
           ChildStdout.silence
+          ChildCoverage.allow_start
           # A block that takes no channel (a zero-arity lambda) still runs.
           result = channel ? yield(wr) : yield
           code = result.is_a?(Integer) ? result : 0
@@ -179,12 +181,17 @@ module Mutineer
     # "base"`). Writing it elsewhere makes those requires resolve to the temp
     # dir and raise LoadError.
     #
+    # Loading the file reopens its namespace. With lazy loading, that can be the
+    # first time Zeitwerk scans the namespace's directory. Zeitwerk skips hidden
+    # files, so the leading dot keeps it from rejecting the tempfile's name as a
+    # constant, in this child and in any other running at the same time (#253).
+    #
     # @api private
     # @param mutated [String] mutated source text.
     # @param source_file [String] original source file path.
     # @return [Object] whatever `load` returns.
     def self.apply_whole_file(mutated, source_file)
-      Tempfile.create(["mutineer_mutant", ".rb"], File.dirname(File.expand_path(source_file))) do |f|
+      Tempfile.create([".mutineer_mutant", ".rb"], File.dirname(File.expand_path(source_file))) do |f|
         f.write(mutated)
         f.flush
         load f.path

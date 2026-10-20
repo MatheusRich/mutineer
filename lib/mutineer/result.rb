@@ -8,13 +8,17 @@ module Mutineer
   #   timeout      - the parent SIGKILLed a child that overran its wall clock.
   #   skipped      - the mutated source failed to re-parse (invalid); no fork.
   #   no_coverage  - no test exercises the mutated line; not run, not scored.
+  #                  Also a mutant on a later line of a multi-line statement,
+  #                  in code that runs only sometimes, that the statement's
+  #                  tests ran but did not kill (#254): they may not reach it.
   #   uncapturable - the line's would-be covering test errored during capture,
   #                  so coverage was lost. Excluded from the denominator exactly
   #                  like no_coverage, but reported separately: it signals a
   #                  broken harness (a test that failed to run), not a genuine
   #                  coverage gap.
   #   unplaceable  - under `--strategy redefine`, the method belongs to a class
-  #                  or module that cannot be named statically, so it has no
+  #                  or module that cannot be named statically (for example
+  #                  each class that includes a concern), so it has no
   #                  owner to be loaded onto and is not run. Excluded from the
   #                  denominator and, unlike uncapturable, from the
   #                  no-verdict gate: nothing is broken. `--strategy reload`
@@ -34,10 +38,10 @@ module Mutineer
   #
   # `error` and `skipped` are deliberately distinct: skipped is a pre-fork
   # validity failure (counted separately by the reporter), error is a runtime
-  # crash. Never conflate them via `details` string parsing. `no_coverage`,
-  # `uncapturable` and `unplaceable` are pre-fork results, and `ran_at_load` is
-  # pre-fork or a reclassified survivor: all excluded from the score
-  # denominator.
+  # crash. Never conflate them via `details` string parsing. `uncapturable` and
+  # `unplaceable` are pre-fork results, and `no_coverage` and `ran_at_load` are
+  # pre-fork or a reclassified result (JobPlan.selection_verdict,
+  # JobPlan.load_verdict): all excluded from the score denominator.
   #
   # `subject`, `mutation`, and `id` are nil when the Result is built by
   # Isolation/Runner (which only know the outcome); the orchestrator attaches
@@ -53,8 +57,9 @@ module Mutineer
   # from a fork back to the process that forked it, so both ends always run the
   # same code. Nothing persists a marshaled Result (reports, baselines and the
   # coverage cache are JSON), so a new field needs no Marshal compatibility.
-  Result = Data.define(:status, :details, :subject, :mutation, :id, :kills) do
-    # Every field but `status` defaults to nil.
+  Result = Data.define(:status, :details, :subject, :mutation, :id, :kills, :reason) do
+    # Every field but `status` defaults to nil. `reason` is the text a user
+    # gave for an ignored mutant, from an inline marker or an `ignore:` mapping.
     #
     # @param status [Symbol] the outcome.
     # @param details [String, nil] error or skip details.
@@ -62,7 +67,8 @@ module Mutineer
     # @param mutation [Mutineer::Mutation, nil] the mutation.
     # @param id [String, nil] the stable mutant id.
     # @param kills [Mutineer::Kills, nil] the matrix row of a `--matrix` run.
-    def initialize(status:, details: nil, subject: nil, mutation: nil, id: nil, kills: nil)
+    # @param reason [String, nil] why an ignored mutant was suppressed.
+    def initialize(status:, details: nil, subject: nil, mutation: nil, id: nil, kills: nil, reason: nil)
       super
     end
 
