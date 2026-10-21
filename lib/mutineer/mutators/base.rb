@@ -58,8 +58,9 @@ module Mutineer
       # that does not contain it turns the body into Ruby, which parses and
       # then raises. A replacement that still contains the opener keeps the
       # body attached, so that mutation stays. The reverse also breaks: when
-      # the replaced range holds the body but the replacement keeps the
-      # opener, the opener has no body and the source does not parse.
+      # the replaced range holds the body but the replacement keeps only the
+      # opener, the opener has no body and the source does not parse. A
+      # replacement that copies the opener and the body together stays.
       #
       # @return [void]
       def drop_dangling_heredocs
@@ -82,7 +83,12 @@ module Mutineer
             hangs = closing.nil? || closing.end_offset > mutation.end_offset
             opener = @source.byteslice(opening.start_offset, opening.end_offset - opening.start_offset)
             kept = !opener.empty? && mutation.replacement.include?(opener)
-            return true if kept != hangs
+            if hangs
+              return true unless kept
+            elsif kept
+              whole = @source.byteslice(opening.start_offset, closing.end_offset - opening.start_offset)
+              return true unless mutation.replacement.include?(whole)
+            end
           end
         end
 
