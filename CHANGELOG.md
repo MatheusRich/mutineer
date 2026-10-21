@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- **Call-to-receiver operator** (Tier-2, opt-in via `--operators`):
+  `call_to_receiver` replaces the last call of a chain with its receiver, with
+  the arguments and block of that call (`user.full_name` -> `user`). The mutant
+  survives when no test checks what that last call does. It does not overlap
+  with `chain_link`: `chain_link` drops a call in the middle of a chain, and
+  `call_to_receiver` drops only the last call. The two give the same source
+  only when the last call repeats the call before it (`node.name.name`). It
+  skips the same names as `chain_link`, and it skips operator calls and
+  setters.
 - **Reasons on ignored mutants.** Text after `--` on
   `# mutineer:disable-line`, and a `.mutineer.yml` `ignore:` mapping
   (`id` plus `reason`), is stored on the ignored mutant. The JSON report
