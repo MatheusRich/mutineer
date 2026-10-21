@@ -98,6 +98,11 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 
+- **No heredoc opener without its body.** A mutation that kept a heredoc
+  opener but replaced the lines of its body gave source that does not parse,
+  such as `operand_removal` on `foo(<<~EOS) ||` with the body and `bar` on
+  the next lines. The mutant showed only as `skipped (invalid)`. Now the
+  operator does not emit it.
 - **An RSpec run that fails only on an error outside examples scores the
   mutant `errored`, not `killed`.** A spec file that raised while loading, or
   a failing `before(:suite)` hook, made RSpec exit 1, and every mutant was
