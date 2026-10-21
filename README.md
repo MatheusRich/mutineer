@@ -696,7 +696,7 @@ no code with Mutant.
 | Test frameworks | Minitest and RSpec, in one gem | RSpec, Minitest and Test::Unit, one integration gem each |
 | What you mutate | Files (`mutineer run lib/foo.rb --test test/foo_test.rb`), narrowed to one method with `--only 'Foo#bar'` | Subjects named by expression (`mutant run 'Foo#bar'`, `'Foo*'`) |
 | Which tests run | The test files whose coverage reaches the mutated line | The tests that declare the subject (an RSpec description or a Minitest `cover`), or the tests that ran it in a per-test coverage recording |
-| Operators | 20 (5 by default, 15 opt-in) | A larger set; the default `light` set applies almost all of it (`full` adds `#==` to `#eql?`) |
+| Operators | 21 (5 by default, 16 opt-in) | A larger set; the default `light` set applies almost all of it (`full` adds `#==` to `#eql?`) |
 | CI gating | `--threshold`, `--baseline` deltas, `--since`, and a GitHub Action | Incremental mode (`--since`) and a recorded session history |
 | Machine-readable output | Versioned JSON report schema | Session JSON schema |
 
